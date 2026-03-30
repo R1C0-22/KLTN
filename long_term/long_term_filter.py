@@ -1,0 +1,276 @@
+"""
+Long-term history filtering for Temporal Knowledge Graph Forecasting.
+
+This module implements the paper's dynamic threshold filtering step for the
+Probability Distribution Calculation (PDC) / Dynamic Threshold Filtering
+described in §3.2.2.
+
+Required functions:
+  - compute_scores_with_llm(history)
+  - dynamic_threshold(F, delta_t, T, alpha)
+  - filter_long_term(history, scores)
+
+Notes on `compute_scores_with_llm`
+----------------------------------
+The original paper computes a probability p(hl) for each historical event hl
+using LLM token/logit scores and softmax normalization.
+
+This repository does not ship an LLM client wrapper, so this function expects
+an external "LLM scorer" callable to be provided via an environment variable:
+
+    LLM_SCORER="some_python_module:some_function"
+
+The callable must have this signature:
+    score_fn(prompt: str, events: list[Any]) -> list[float]
+
+where the returned list is a set of per-event *logits* (or any real-valued
+scores that can be softmax-normalized).
+
+`compute_scores_with_llm` loads the prompt template from:
+    prompts/filter_prompt.txt
+relative to the repository root.
+"""
+
+from __future__ import annotations
+
+import importlib
+import json
+import math
+import os
+from dataclasses import dataclass
+from datetime import datetime
+from pathlib import Path
+from typing import Any, Iterable, Sequence
+
+
+def _event_timestamp(event: Any) -> str:
+    if hasattr(event, "timestamp"):
+        return str(event.timestamp)
+    if isinstance(event, (tuple, list)) and len(event) >= 4:
+        return str(event[3])
+    raise TypeError("Event must be Quadruple-like (timestamp attribute) or a 4-tuple/list.")
+
+
+def _parse_timestamp(ts: str) -> datetime | None:
+    ts = str(ts).strip()
+    for fmt in (
+        "%Y-%m-%d",
+        "%Y/%m/%d",
+        "%Y-%m-%dT%H:%M:%S",
+        "%d/%m/%Y",
+    ):
+        try:
+            return datetime.strptime(ts, fmt)
+        except ValueError:
+            continue
+    return None
+
+
+def _extract_event_fields(event: Any) -> tuple[str, str, str, str]:
+    if (
+        hasattr(event, "subject")
+        and hasattr(event, "relation")
+        and hasattr(event, "object")
+        and hasattr(event, "timestamp")
+    ):
+        return (str(event.subject), str(event.relation), str(event.object), str(event.timestamp))
+    if isinstance(event, (tuple, list)) and len(event) >= 4:
+        s, r, o, t = event[0], event[1], event[2], event[3]
+        return str(s), str(r), str(o), str(t)
+    raise TypeError("Event must be Quadruple-like or a 4-tuple/list (s,r,o,t).")
+
+
+def _softmax(logits: Sequence[float]) -> list[float]:
+    # Softmax via log-sum-exp for numerical stability.
+    max_logit = max(logits) if logits else 0.0
+    exps = [math.exp(x - max_logit) for x in logits]
+    denom = sum(exps) if exps else 0.0
+    if denom == 0.0:
+        return [0.0 for _ in logits]
+    return [v / denom for v in exps]
+
+
+def _load_prompt_template() -> str:
+    repo_root = Path(__file__).resolve().parent.parent.parent
+    prompt_path = repo_root / "prompts" / "filter_prompt.txt"
+    if not prompt_path.is_file():
+        raise FileNotFoundError(
+            f"Missing prompt template: {prompt_path}. "
+            "Create prompts/filter_prompt.txt or update the module to point to your prompt."
+        )
+    return prompt_path.read_text(encoding="utf-8")
+
+
+def _load_llm_scorer_from_env() -> Any:
+    spec = os.environ.get("LLM_SCORER", "").strip()
+    if not spec:
+        raise EnvironmentError(
+            "LLM_SCORER is not set. Set it to 'some_module:some_function' so "
+            "compute_scores_with_llm(history) can call an LLM scoring function."
+        )
+
+    if ":" not in spec:
+        raise ValueError("LLM_SCORER must be in format 'module_path:function_name'.")
+
+    module_name, fn_name = spec.split(":", 1)
+    module = importlib.import_module(module_name)
+    fn = getattr(module, fn_name)
+    if not callable(fn):
+        raise TypeError(f"LLM_SCORER resolved to non-callable: {spec}")
+    return fn
+
+
+def compute_scores_with_llm(history: Sequence[Any]) -> list[float]:
+    """Compute per-event effectiveness *logits/scores* using an LLM scorer.
+
+    Parameters
+    ----------
+    history:
+        Sequence of events. Each event must be Quadruple-like or a 4-tuple/list.
+
+    Returns
+    -------
+    logits:
+        List of real-valued logits/scores aligned with the order of `history`.
+
+    Notes
+    -----
+    The paper normalizes these scores with a softmax *within each time-step
+    group* H^{t_j} when computing p(hl). Therefore this function returns raw
+    logits; :func:`filter_long_term` performs the per-group softmax.
+    """
+    if not history:
+        return []
+
+    prompt_template = _load_prompt_template()
+    score_fn = _load_llm_scorer_from_env()
+
+    labeled_events = []
+    for i, ev in enumerate(history, start=1):
+        s, r, o, t = _extract_event_fields(ev)
+        labeled_events.append(f"{i}. ({s}, {r}, {o}, {t})")
+
+    # The template is user-defined; support common placeholders.
+    # If the template expects a `query`, we use the most recent event as a proxy.
+    labeled_history = "\n".join(labeled_events)
+    query_proxy = labeled_events[-1] if labeled_events else ""
+    prompt = prompt_template.format(
+        history=labeled_history,
+        events=labeled_history,
+        query=query_proxy,
+    )
+
+    # The scorer returns logits/scores for each event in the same order.
+    logits = score_fn(prompt, list(history))
+    if len(logits) != len(history):
+        raise ValueError(
+            f"LLM scorer returned {len(logits)} logits but history has {len(history)} events."
+        )
+
+    return [float(x) for x in logits]
+
+
+def dynamic_threshold(F: int, delta_t: float, T: float, alpha: float) -> float:
+    """Dynamic Threshold Filtering confidence threshold.
+
+    Follows the paper's formula (Eq. 2):
+      c_j = 1/F + (1 - 1/F) * ( (Delta_t) / T )^alpha
+
+    Parameters
+    ----------
+    F : int
+        Number of events in the historical set at time step j.
+    delta_t : float
+        Time difference between query time and this time step.
+    T : float
+        Total time difference between query time and the earliest time.
+    alpha : float
+        Variation factor controlling the growth rate.
+    """
+    if F <= 0:
+        raise ValueError("F must be > 0")
+    if T <= 0:
+        # Degenerate case; use the lower bound 1/F.
+        return 1.0 / float(F)
+
+    base = 1.0 / float(F)
+    ratio = float(delta_t) / float(T)
+    # Paper intends non-negative ratio; clamp to avoid negative power issues.
+    ratio = max(ratio, 0.0)
+    return base + (1.0 - base) * (ratio**alpha)
+
+
+def filter_long_term(
+    history: Sequence[Any],
+    scores: Sequence[float],
+) -> list[Any]:
+    """Filter long-term history events using dynamic thresholds.
+
+    Because the paper partitions history into time steps {t_j}, we group
+    events in `history` by their exact parsed timestamp. For each timestamp
+    group, we compute its dynamic threshold c_j and keep events with
+    p(hl) >= c_j, where p(hl) is the softmax-normalized probability over
+    logits *within the same time-step group*.
+
+    The returned list keeps chronological order (oldest -> newest).
+    """
+    if not history:
+        return []
+    if len(history) != len(scores):
+        raise ValueError("history and scores must have the same length.")
+
+    # Parse timestamps for ordering and for Δt/T computations.
+    parsed: list[tuple[int, Any, float | None]] = []
+    for idx, ev in enumerate(history):
+        ts = _event_timestamp(ev)
+        dt = _parse_timestamp(ts)
+        parsed.append((idx, ev, dt.timestamp() if dt is not None else None))
+
+    # Keep only parseable timestamps for dynamic threshold computation.
+    # If nothing is parseable, return history unchanged.
+    ts_values = [p[2] for p in parsed if p[2] is not None]
+    if not ts_values:
+        return list(history)
+
+    t_min = min(ts_values)
+    t_max = max(ts_values)  # Treat as query time in the absence of explicit t_q.
+    T = t_max - t_min
+    if T <= 0:
+        return list(history)
+
+    # Group events by their timestamp seconds.
+    groups: dict[float, list[int]] = {}
+    for idx, _, sec in parsed:
+        if sec is None:
+            continue
+        groups.setdefault(sec, []).append(idx)
+
+    # Determine threshold per group.
+    alpha = 2.75
+    thresholds: dict[float, float] = {}
+    for sec, idxs in groups.items():
+        F = len(idxs)
+        delta_t = t_max - sec
+        thresholds[sec] = dynamic_threshold(F=F, delta_t=delta_t, T=T, alpha=alpha)
+
+    # Filter by comparing each event's within-group softmax probability
+    # with its group's threshold.
+    keep_by_idx = set()
+    for sec, idxs in groups.items():
+        c = thresholds[sec]
+        group_logits = [float(scores[idx]) for idx in idxs]
+        group_probs = _softmax(group_logits)
+        for idx_local, idx in enumerate(idxs):
+            if group_probs[idx_local] >= c:
+                keep_by_idx.add(idx)
+
+    # Return in chronological order.
+    chronological = sorted(
+        [
+            (i, ev, _parse_timestamp(_event_timestamp(ev)) or datetime.min)
+            for i, ev, _ in parsed
+        ],
+        key=lambda x: x[2],
+    )
+    return [ev for i, ev, _ in chronological if i in keep_by_idx]
+

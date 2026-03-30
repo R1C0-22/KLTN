@@ -44,9 +44,6 @@ _ENTITY_PROMPT_PREFIX = (
     "This is a named entity from an international political event dataset: "
 )
 
-_SILHOUETTE_WEAK = 0.25
-
-
 # ---------------------------------------------------------------------------
 # Public dataclass returned by the pipeline
 # ---------------------------------------------------------------------------
@@ -75,26 +72,19 @@ class ClusterResult:
         return self.get_cluster(int(self.labels[idx]))
 
     def summary(self) -> str:
-        quality = "GOOD" if self.silhouette >= _SILHOUETTE_WEAK else "WEAK"
+        unique, counts = np.unique(self.labels, return_counts=True)
+        avg_size = int(np.mean(counts))
+        max_size = int(np.max(counts))
+        min_size = int(np.min(counts))
         lines = [
             f"Entities  : {len(self.entities):,}",
             f"Optimal K : {self.k}",
-            f"Silhouette: {self.silhouette:.4f}  ({quality})",
+            f"Silhouette: {self.silhouette:.4f}",
+            f"Cluster sizes: avg={avg_size}, min={min_size}, max={max_size}",
             "",
-            "Cluster sizes:",
         ]
-        unique, counts = np.unique(self.labels, return_counts=True)
         for cid, cnt in zip(unique, counts):
             lines.append(f"  cluster {cid:>3d}: {cnt:>6,} entities")
-        if self.silhouette < _SILHOUETTE_WEAK:
-            lines.append("")
-            lines.append(
-                f"  [!] Silhouette < {_SILHOUETTE_WEAK} — cluster structure is weak."
-            )
-            lines.append(
-                "      This is expected with few entities. "
-                "Try the full dataset for meaningful clusters."
-            )
         return "\n".join(lines)
 
 
@@ -109,7 +99,7 @@ def embed_entities(
     batch_size: int = 256,
     device: str | None = None,
     show_progress: bool = True,
-    prompt_prefix: str | None = _ENTITY_PROMPT_PREFIX,
+    prompt_prefix: str | None = None,
 ) -> NDArray[np.float32]:
     """Encode entity names into dense embedding vectors.
 
@@ -126,9 +116,8 @@ def embed_entities(
     show_progress : bool
         Show a tqdm progress bar during encoding.
     prompt_prefix : str or None
-        Prepended to each entity name before encoding to give the
-        sentence-transformer more semantic context.  Set to ``None``
-        to embed the raw names.
+        Optional text prepended to each entity name before encoding.
+        If ``None`` (default), the function embeds the raw entity names.
 
     Returns
     -------
@@ -150,37 +139,6 @@ def embed_entities(
     return embeddings.astype(np.float32)
 
 
-def _find_elbow(k_values: list[int], inertias: list[float]) -> int:
-    """Find the elbow/knee point using the max-distance-from-line method.
-
-    Draws a straight line from the first point (k_min, inertia_max) to
-    the last point (k_max, inertia_min) and picks the K whose inertia
-    is farthest *below* that line.
-    """
-    p1 = np.array([k_values[0], inertias[0]], dtype=np.float64)
-    p2 = np.array([k_values[-1], inertias[-1]], dtype=np.float64)
-    line_vec = p2 - p1
-    line_len = np.linalg.norm(line_vec)
-
-    if line_len == 0:
-        return k_values[len(k_values) // 2]
-
-    line_unit = line_vec / line_len
-    best_dist = -1.0
-    best_k = k_values[0]
-
-    for k, inertia in zip(k_values, inertias):
-        pt = np.array([k, inertia], dtype=np.float64)
-        proj = np.dot(pt - p1, line_unit)
-        closest = p1 + proj * line_unit
-        dist = np.linalg.norm(pt - closest)
-        if dist > best_dist:
-            best_dist = dist
-            best_k = k
-
-    return best_k
-
-
 def find_optimal_k(
     embeddings: NDArray[np.float32],
     *,
@@ -190,25 +148,20 @@ def find_optimal_k(
     random_state: int = 42,
     sample_limit: int = 20_000,
 ) -> tuple[int, dict[int, float]]:
-    """Select the optimal cluster count K using elbow method + silhouette.
+    """Select the optimal cluster count K using elbow + silhouette.
 
-    Following AnRe Section 3.1, this uses *both* the elbow method (on KMeans
-    inertia) and the silhouette coefficient:
-
-    1. Run KMeans for each candidate K and record inertia + silhouette.
-    2. Find the **elbow point** on the inertia curve (the K where adding
-       more clusters stops reducing inertia significantly).
-    3. In a neighbourhood around the elbow, pick the K with the
-       **highest silhouette score**.
+    The paper (§3.1) suggests using an elbow method and the silhouette
+    coefficient to pick a good K, then selecting the K with the highest
+    silhouette for the final k-means.
 
     Parameters
     ----------
     embeddings : ndarray (N, D)
     k_min, k_max : int
-        Range of K values to evaluate.  *k_max* defaults to
-        ``min(int(sqrt(N)), 100)`` when not set.
+        Range of K values to consider. *k_max* defaults to
+        ``min(int(sqrt(N)), 50)`` when not set.
     step : int
-        Step size between evaluated K values.
+        Step size for the elbow sweep over K.
     random_state : int
         Seed for reproducibility.
     sample_limit : int
@@ -222,7 +175,7 @@ def find_optimal_k(
     """
     n = len(embeddings)
     if k_max is None:
-        k_max = min(int(np.sqrt(n)), 100)
+        k_max = min(int(np.sqrt(n)), 50)
     k_max = min(k_max, n - 1)
     k_min = max(k_min, 2)
 
@@ -243,42 +196,53 @@ def find_optimal_k(
     else:
         sample_emb = embeddings
 
-    k_values: list[int] = []
+    # ---------- 1) Elbow search (inertia curve) ----------
+    ks = list(range(k_min, k_max + 1, max(1, step)))
     inertias: list[float] = []
-    scores: dict[int, float] = {}
 
-    for k in range(k_min, k_max + 1, step):
+    for k in ks:
+        km = KMeans(n_clusters=k, random_state=random_state, n_init=10)
+        km.fit(sample_emb)
+        inertias.append(float(km.inertia_))
+        logger.info("K=%d  inertia=%.4f", k, inertias[-1])
+
+    # Choose elbow as the point farthest from the line joining endpoints.
+    x0, y0 = float(ks[0]), inertias[0]
+    x1, y1 = float(ks[-1]), inertias[-1]
+    denom = ((x1 - x0) ** 2 + (y1 - y0) ** 2) ** 0.5
+    if denom == 0:
+        elbow_k = ks[len(ks) // 2]
+    else:
+        distances: list[float] = []
+        for k, y in zip(ks, inertias):
+            # Distance from point (k,y) to line through (x0,y0)-(x1,y1)
+            num = abs((y1 - y0) * float(k) - (x1 - x0) * float(y) + x1 * y0 - y1 * x0)
+            distances.append(num / denom)
+        elbow_k = int(ks[int(np.argmax(distances))])
+
+    # ---------- 2) Silhouette shortlist ----------
+    # Compute silhouette only around the elbow (paper reduces noise by using
+    # clustering validity rather than exhaustive evaluation).
+    shortlist = sorted(set(range(elbow_k - 2, elbow_k + 3)).intersection(set(ks)))
+    if len(shortlist) < 2:
+        shortlist = sorted(set(ks[: min(3, len(ks))]))
+
+    scores: dict[int, float] = {}
+    for k in shortlist:
         km = KMeans(n_clusters=k, random_state=random_state, n_init=10)
         labels = km.fit_predict(sample_emb)
-        inertias.append(float(km.inertia_))
-        k_values.append(k)
-
         sil = silhouette_score(
-            sample_emb, labels,
+            sample_emb,
+            labels,
             sample_size=min(5_000, len(sample_emb)),
+            metric="cosine",
         )
-        scores[k] = float(sil)
-        logger.info("K=%d  inertia=%.1f  silhouette=%.4f", k, km.inertia_, sil)
+        scores[int(k)] = float(sil)
+        logger.info("K=%d  silhouette=%.4f  (shortlist)", k, sil)
 
-    # --- Elbow detection on the inertia curve ---
-    elbow_k = _find_elbow(k_values, inertias)
-    logger.info("Elbow detected at K=%d", elbow_k)
-
-    # --- Refine: pick best silhouette in a window around the elbow ---
-    window = max(step * 3, 6)
-    candidates = {
-        k: s for k, s in scores.items()
-        if (elbow_k - window) <= k <= (elbow_k + window)
-    }
-    if not candidates:
-        candidates = scores
-
-    best_k = max(candidates, key=candidates.get)  # type: ignore[arg-type]
-    logger.info(
-        "Best K=%d (silhouette=%.4f, elbow neighbourhood [%d, %d])",
-        best_k, scores[best_k], elbow_k - window, elbow_k + window,
-    )
-    return best_k, scores
+    best_k = max(scores, key=scores.get)
+    logger.info("Best K=%d  (silhouette=%.4f)", best_k, scores[best_k])
+    return int(best_k), scores
 
 
 def run_kmeans(
@@ -286,6 +250,8 @@ def run_kmeans(
     k: int,
     *,
     random_state: int = 42,
+    n_init: int = 20,
+    max_iter: int = 500,
 ) -> NDArray[np.intp]:
     """Run KMeans on *embeddings* with *k* clusters.
 
@@ -293,7 +259,13 @@ def run_kmeans(
     -------
     np.ndarray of shape ``(N,)`` — cluster label for each entity.
     """
-    km = KMeans(n_clusters=k, random_state=random_state, n_init=10)
+    km = KMeans(
+        n_clusters=k,
+        random_state=random_state,
+        n_init=n_init,
+        max_iter=max_iter,
+        init="k-means++",
+    )
     return km.fit_predict(embeddings)
 
 
