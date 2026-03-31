@@ -30,6 +30,16 @@ def _event_fields(event: Any) -> tuple[str, str, str, str]:
         and hasattr(event, "timestamp")
     ):
         return (str(event.subject), str(event.relation), str(event.object), str(event.timestamp))
+    if isinstance(event, dict):
+        s = event.get("subject") or event.get("s")
+        r = event.get("relation") or event.get("r")
+        o = event.get("object") or event.get("o")
+        t = event.get("timestamp") or event.get("t") or event.get("time")
+        if s is None or r is None or o is None or t is None:
+            raise TypeError(
+                "query_event dict must contain keys: subject/s, relation/r, object/o, timestamp/t."
+            )
+        return (str(s), str(r), str(o), str(t))
     if isinstance(event, (tuple, list)) and len(event) >= 4:
         s, r, o, t = event[0], event[1], event[2], event[3]
         return str(s), str(r), str(o), str(t)
@@ -54,10 +64,15 @@ def _parse_timestamp(ts: str) -> datetime | None:
 def _load_callable_from_env(var_name: str) -> Callable[[str], str]:
     spec = os.environ.get(var_name, "").strip()
     if not spec:
-        raise EnvironmentError(
-            f"{var_name} is not set. Expected format 'module_path:function_name' "
-            f"with signature callable(prompt: str) -> str."
-        )
+        # Permanent defaults: use local Ollama adapter.
+        if var_name == "LLM_PREDICTOR":
+            spec = "Code.llm.ollama_adapter:predict_fn"
+        elif var_name == "LLM_GENERATOR":
+            spec = "Code.llm.ollama_adapter:generate_fn"
+        else:
+            raise EnvironmentError(
+                f"{var_name} is not set and no default is configured."
+            )
     if ":" not in spec:
         raise ValueError(f"{var_name} must be in format 'module_path:function_name'.")
     module_name, fn_name = spec.split(":", 1)
@@ -182,9 +197,10 @@ def predict_next_object(query_event: Any) -> str:
     l = int(os.environ.get("SHORT_TERM_L", "20"))
     short_history = get_short_term(rel_history, l=l)
 
-    # Long-term: dynamic threshold filtering based on LLM scores
-    # (We score the entire relation-filtered history, then keep those passing thresholds.)
-    scores = compute_scores_with_llm(rel_history)
+    # Long-term: dynamic threshold filtering based on LLM scores (paper PDC + DTF).
+    # We score the relation-filtered history using the masked query event as the Question.
+    masked_query_event = (s, r, "?", t)
+    scores = compute_scores_with_llm(rel_history, masked_query_event)
     long_filtered = filter_long_term(rel_history, scores)
 
     # Similar events for analogical reasoning: use last m from the long-term filtered set.

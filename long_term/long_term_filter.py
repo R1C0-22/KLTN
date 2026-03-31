@@ -104,10 +104,9 @@ def _load_prompt_template() -> str:
 def _load_llm_scorer_from_env() -> Any:
     spec = os.environ.get("LLM_SCORER", "").strip()
     if not spec:
-        raise EnvironmentError(
-            "LLM_SCORER is not set. Set it to 'some_module:some_function' so "
-            "compute_scores_with_llm(history) can call an LLM scoring function."
-        )
+        # Permanent default: use local Ollama adapter.
+        # You can override by setting LLM_SCORER.
+        spec = "Code.llm.ollama_adapter:score_fn"
 
     if ":" not in spec:
         raise ValueError("LLM_SCORER must be in format 'module_path:function_name'.")
@@ -120,13 +119,53 @@ def _load_llm_scorer_from_env() -> Any:
     return fn
 
 
-def compute_scores_with_llm(history: Sequence[Any]) -> list[float]:
+def _make_question_from_query_event(query_event: Any) -> str:
+    """
+    Create a natural-language question like the paper's Figure 8.
+
+    Input query_event should represent a masked query (s, r, ?, t).
+    We generate a sentence via `verbalize_event` then convert it to a question.
+    """
+    from Code.preprocessing import verbalize_event
+
+    s, r, o, t = _extract_event_fields(query_event)
+    # Force mask for safety
+    masked_sentence = verbalize_event(s, r, "?", t).strip()
+    if masked_sentence.endswith("."):
+        masked_sentence = masked_sentence[:-1]
+
+    # Heuristic question conversion depending on connector near the mask.
+    # Prefer "whom" because objects are entities in TKG.
+    lower = masked_sentence.lower()
+    if lower.endswith(" with ?"):
+        return masked_sentence[:-2] + "whom?"
+    if lower.endswith(" to ?"):
+        return masked_sentence[:-2] + "whom?"
+    if lower.endswith(" by ?"):
+        return masked_sentence[:-2] + "whom?"
+    if lower.endswith(" from ?"):
+        return masked_sentence[:-2] + "whom?"
+    if lower.endswith(" against ?"):
+        return masked_sentence[:-2] + "whom?"
+    if lower.endswith(" about ?"):
+        return masked_sentence[:-2] + "what?"
+
+    # Generic fallback.
+    if masked_sentence.endswith(" ?"):
+        return masked_sentence[:-2] + "whom?"
+    return masked_sentence + " Whom?"
+
+
+def compute_scores_with_llm(history: Sequence[Any], query_event: Any) -> list[float]:
     """Compute per-event effectiveness *logits/scores* using an LLM scorer.
 
     Parameters
     ----------
     history:
         Sequence of events. Each event must be Quadruple-like or a 4-tuple/list.
+    query_event:
+        Masked query event (s, r, ?, t) used to form the Question in the prompt,
+        matching the paper's PDC setup (Figure 8 / Table 7).
 
     Returns
     -------
@@ -151,21 +190,26 @@ def compute_scores_with_llm(history: Sequence[Any]) -> list[float]:
         labeled_events.append(f"{i}. ({s}, {r}, {o}, {t})")
 
     # The template is user-defined; support common placeholders.
-    # If the template expects a `query`, we use the most recent event as a proxy.
+    # Following the paper, we build a natural-language question from the masked query.
     labeled_history = "\n".join(labeled_events)
-    query_proxy = labeled_events[-1] if labeled_events else ""
+    query_text = _make_question_from_query_event(query_event)
     prompt = prompt_template.format(
         history=labeled_history,
         events=labeled_history,
-        query=query_proxy,
+        query=query_text,
+        n=len(history),
     )
 
     # The scorer returns logits/scores for each event in the same order.
     logits = score_fn(prompt, list(history))
-    if len(logits) != len(history):
+    expected = len(history)
+    if len(logits) < expected:
         raise ValueError(
-            f"LLM scorer returned {len(logits)} logits but history has {len(history)} events."
+            f"LLM scorer returned {len(logits)} scores but history has {expected} events."
         )
+    if len(logits) > expected:
+        # Be robust to models that output extra values.
+        logits = list(logits)[:expected]
 
     return [float(x) for x in logits]
 

@@ -65,10 +65,9 @@ def _load_prompt_template() -> str:
 def _load_llm_generator_from_env() -> Callable[[str], str]:
     spec = os.environ.get("LLM_GENERATOR", "").strip()
     if not spec:
-        raise EnvironmentError(
-            "LLM_GENERATOR is not set. Set it to 'module:function' so "
-            "generate_analogical_reasoning can call your LLM generator."
-        )
+        # Permanent default: use local Ollama adapter.
+        # You can override by setting LLM_GENERATOR.
+        spec = "Code.llm.ollama_adapter:generate_fn"
     if ":" not in spec:
         raise ValueError("LLM_GENERATOR must be in format 'module_path:function_name'.")
 

@@ -36,7 +36,8 @@ def main() -> None:
         ("A", "visit", "E", "2014-03-01"),
     ]
 
-    scores = compute_scores_with_llm(history)
+    query_event = ("A", "meet", "?", "2014-02-20")
+    scores = compute_scores_with_llm(history, query_event)
     assert len(scores) == len(history)
 
     filtered = filter_long_term(history, scores)
