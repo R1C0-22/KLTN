@@ -12,6 +12,7 @@ Both functions are designed to work with either:
 
 from __future__ import annotations
 
+from datetime import datetime
 from typing import Any, Iterable, Sequence
 
 from common import event_fields, parse_timestamp
