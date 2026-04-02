@@ -249,16 +249,26 @@ def _call_huggingface(prompt: str) -> str:
     messages = [{"role": "user", "content": prompt}]
 
     if getattr(tokenizer, "chat_template", None):
-        input_ids = tokenizer.apply_chat_template(
+        # Some transformer/tokenizer versions return non-tensor objects from
+        # `apply_chat_template(..., return_tensors="pt")`. To stay robust,
+        # first materialize the prompt text, then re-tokenize with
+        # `tokenizer(prompt_text, return_tensors="pt")`.
+        prompt_text = tokenizer.apply_chat_template(
             messages,
             add_generation_prompt=True,
-            return_tensors="pt",
+            tokenize=False,
         )
+        input_ids = tokenizer(prompt_text, return_tensors="pt").input_ids
     else:
         input_ids = tokenizer(prompt, return_tensors="pt").input_ids
 
+    # Defensive fallback: enforce a torch tensor of token ids.
     if not torch.is_tensor(input_ids):
-        input_ids = torch.tensor(input_ids)
+        # tokenizers.Encoding / BatchEncoding might sneak in on edge versions.
+        if hasattr(input_ids, "input_ids"):
+            input_ids = input_ids.input_ids
+        if not torch.is_tensor(input_ids):
+            input_ids = torch.tensor(input_ids, dtype=torch.long)
     device = next(model.parameters()).device
     input_ids = input_ids.to(device)
 
