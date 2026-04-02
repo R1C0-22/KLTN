@@ -170,12 +170,12 @@ def predict_next_object(query_event: Any) -> str:
     rel_history = filter_by_relation(entity_history, r)
 
     # Time restriction: keep events strictly before/equal to query time.
-    query_dt = _parse_timestamp(t)
+    query_dt = parse_timestamp(t)
     if query_dt is not None:
         rel_before: list[Any] = []
         for ev in rel_history:
             _, _, _, ev_t = _event_fields(ev)
-            ev_dt = _parse_timestamp(ev_t)
+            ev_dt = parse_timestamp(ev_t)
             if ev_dt is not None and ev_dt <= query_dt:
                 rel_before.append(ev)
         rel_history = rel_before
