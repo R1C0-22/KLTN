@@ -12,7 +12,7 @@ import csv
 import json
 import re
 from dataclasses import dataclass
-from datetime import datetime
+from datetime import datetime, timedelta
 from pathlib import Path
 from typing import Sequence
 
@@ -220,9 +220,25 @@ def _format_date(timestamp: str) -> str:
     """Convert a timestamp string into a human-readable date.
 
     Supports ISO-like formats (2014-01-01, 2014/01/01) and already-
-    readable dates (passed through unchanged).
+    readable dates (passed through unchanged). For ICEWS-style datasets
+    where timestamps are integer day indices (time IDs), this function
+    maps them to calendar dates assuming a dataset-specific start date.
+    For ICEWS05-15, we treat ``0`` as 1 January 2005 and add days.
     """
     timestamp = timestamp.strip()
+
+    # Handle pure integer time IDs (as used in ICEWS datasets).
+    if timestamp.isdigit():
+        try:
+            time_id = int(timestamp)
+        except ValueError:
+            time_id = None
+        if time_id is not None:
+            # ICEWS05-15 spans 2005-01-01 onward. We treat 0 as 2005-01-01.
+            base_date = datetime(2005, 1, 1)
+            dt = base_date + timedelta(days=time_id)
+            return f"{dt.day} {dt.strftime('%B')} {dt.year}"
+
     for fmt in ("%Y-%m-%d", "%Y/%m/%d", "%Y-%m-%dT%H:%M:%S", "%d/%m/%Y"):
         try:
             dt = datetime.strptime(timestamp, fmt)
@@ -480,12 +496,22 @@ def _load_icews_id_directory(
                     o_id = int(o_id_str)
                 except ValueError:
                     # If any field is non-integer, fall back to raw strings.
-                    s, r, o, t = s_id_str, r_id_str, o_id_str, t_id_str
+                    s = s_id_str
+                    # Normalize relation: replace underscores and lowercase so it
+                    # matches RELATION_TEMPLATES keys (e.g. "Make_statement" →
+                    # "make statement").
+                    r = r_id_str.replace("_", " ").lower().strip()
+                    o = o_id_str
+                    t = t_id_str
                 else:
-                    s = ent_map.get(s_id, s_id_str)
-                    r = rel_map.get(r_id, r_id_str)
-                    o = ent_map.get(o_id, o_id_str)
-                    t = t_id_str  # keep numeric time ID as-is
+                    raw_s = ent_map.get(s_id, s_id_str)
+                    raw_r = rel_map.get(r_id, r_id_str)
+                    raw_o = ent_map.get(o_id, o_id_str)
+                    # Normalize relation string to align with RELATION_TEMPLATES.
+                    r = raw_r.replace("_", " ").lower().strip()
+                    s = raw_s
+                    o = raw_o
+                    t = t_id_str  # keep numeric time ID; _format_date will map it
 
                 quads.append(Quadruple(s, r, o, t))
 
