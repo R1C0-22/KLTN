@@ -2,7 +2,7 @@
 Quick smoke test for long-term dynamic threshold filtering.
 
 This test does not call a real LLM. It uses the dummy scorer:
-  LLM_SCORER=Code.long_term.dummy_scorer:score_fn
+  LLM_SCORER=long_term.dummy_scorer:score_fn
 """
 
 from __future__ import annotations
@@ -22,7 +22,7 @@ from long_term import compute_scores_with_llm, filter_long_term
 
 def main() -> None:
     # Enable dummy scoring.
-    os.environ.setdefault("LLM_SCORER", "Code.long_term.dummy_scorer:score_fn")
+    os.environ.setdefault("LLM_SCORER", "long_term.dummy_scorer:score_fn")
 
     # Synthetic history: (s, r, o, t)
     # Note: include repeated timestamps so some time-step groups have F>1.

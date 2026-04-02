@@ -2,9 +2,9 @@
 Run the full `predict_next_object()` pipeline using Ollama locally.
 
 This script relies on the permanent Ollama fallbacks added to:
-  - Code.analogical.analogical_reasoning
-  - Code.long_term.long_term_filter
-  - Code.inference.final_prediction
+  - analogical.analogical_reasoning
+  - long_term.long_term_filter
+  - inference.final_prediction
 
 It only needs:
   - Ollama installed + server running

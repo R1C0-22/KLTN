@@ -2,10 +2,10 @@
 Run analogical reasoning generation on real dataset WITHOUT any real LLM.
 
 This uses the dummy generator shipped in:
-  Code/analogical/dummy_generator.py
+  analogical/dummy_generator.py
 
 It does NOT implement the full AnRe retrieval/selection pipeline; instead it:
-  1) loads real ICEWS quadruples from Code/data/
+  1) loads real ICEWS quadruples from data/
   2) picks one query event
   3) retrieves history events involving the query subject from the train split
   4) filters by the same relation as the query

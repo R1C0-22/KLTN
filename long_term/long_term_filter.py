@@ -95,9 +95,9 @@ def _make_question_from_query_event(query_event: Any) -> str:
     Create a natural-language question like the paper's Figure 8.
 
     Input query_event should represent a masked query (s, r, ?, t).
-    We generate a sentence via `verbalize_event` then convert it to a question.
+    We generate a sentence via `preprocessing.verbalize_event` then convert it to a question.
     """
-    from Code.preprocessing import verbalize_event
+    from preprocessing import verbalize_event
 
     s, r, o, t = _extract_event_fields(query_event)
     # Force mask for safety

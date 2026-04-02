@@ -73,7 +73,7 @@ def _load_callable_from_env(var_name: str) -> Callable[[str], str]:
 def _verbalize_query_with_mask(s: str, r: str, t: str, mask: str = "?") -> str:
     # We reuse the verbalization logic for known relations, but keep `object`
     # masked so it reads as a prediction question.
-    from Code.preprocessing import verbalize_event
+    from preprocessing import verbalize_event
 
     return verbalize_event(s, r, mask, t)
 
@@ -128,10 +128,10 @@ def _load_history_data_from_query_event(query_event: Any) -> list[Any]:
     if not data_dir:
         raise EnvironmentError(
             "No data provided. Pass query_event.data or set TKG_DATA_DIR "
-            "to a dataset directory like Code/data/ICEWS05-15."
+            "to a dataset directory like data/ICEWS05-15."
         )
 
-    from Code.preprocessing import load_dataset
+    from preprocessing import load_dataset
 
     # Default: use train split as history pool.
     return load_dataset(data_dir, splits=["train"])
@@ -148,7 +148,7 @@ def predict_next_object(query_event: Any) -> str:
     strings are allowed but candidates are extracted from history events.
 
     LLM configuration:
-      - LLM_SCORER: required by long-term filtering (Code.long_term)
+      - LLM_SCORER: required by long-term filtering (long_term)
       - LLM_GENERATOR: required by analogical reasoning generation
       - LLM_PREDICTOR (preferred) or LLM_GENERATOR fallback:
             callable(prompt: str) -> str
@@ -272,7 +272,7 @@ if __name__ == "__main__":
     import sys
 
     if not os.environ.get("TKG_DATA_DIR"):
-        # If user runs directly, point to ICEWS05-15 under the Code/ root by default.
+        # If user runs directly, point to ICEWS05-15 under the project root by default.
         code_root = Path(__file__).resolve().parents[1]
         os.environ["TKG_DATA_DIR"] = str(code_root / "data" / "ICEWS05-15")
 

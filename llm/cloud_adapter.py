@@ -8,7 +8,7 @@ Ollama adapter so that the rest of the codebase can stay unchanged:
     - score_fn(prompt: str, events: Sequence[Any]) -> list[float]
     - predict_fn(prompt: str) -> str
 
-Under the hood it uses `Code.llm.call_llm`, which is already configurable
+Under the hood it uses `llm.call_llm`, which is already configurable
 via environment variables:
 
     LLM_PROVIDER = openai | groq

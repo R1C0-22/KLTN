@@ -2,9 +2,9 @@
 Quick smoke-test for the preprocessing + clustering pipeline.
 
 Run from the project root:
-    python -m Code.test_pipeline                       # full test on ICEWS05-15
-    python -m Code.test_pipeline --small               # fast test with synthetic data
-    python -m Code.test_pipeline --data Code/data/ICEWS05-15
+    python -m test_pipeline                       # full test on ICEWS05-15
+    python -m test_pipeline --small               # fast test with synthetic data
+    python -m test_pipeline --data data/ICEWS05-15
 """
 
 from __future__ import annotations
@@ -157,7 +157,7 @@ def test_small() -> None:
         print(f"\n  [NOTE] Silhouette={best_sil:.4f} is low — expected with only"
               f" {len(entities)} short entity names.")
         print("         Run the full ICEWS test for meaningful clusters:")
-        print("           python -m Code.test_pipeline --max-entities 1000")
+        print("           python -m test_pipeline --max-entities 1000")
 
     print("\nSmall test passed.")
 
@@ -167,7 +167,7 @@ def test_small() -> None:
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Test preprocessing + clustering")
     parser.add_argument("--small", action="store_true", help="Fast test with 20 synthetic entities")
-    parser.add_argument("--data", type=str, default=None, help="Path to dataset dir (e.g. Code/data/ICEWS05-15)")
+    parser.add_argument("--data", type=str, default=None, help="Path to dataset dir (e.g. data/ICEWS05-15)")
     parser.add_argument("--max-entities", type=int, default=500, help="Cap entity count for speed")
     args = parser.parse_args()
 

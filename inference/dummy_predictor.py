@@ -2,7 +2,7 @@
 Dummy final predictor for local testing.
 
 Sets up so `predict_next_object()` can run without a real LLM by using:
-  LLM_PREDICTOR="Code.inference.dummy_predictor:predict_fn"
+  LLM_PREDICTOR="inference.dummy_predictor:predict_fn"
 
 The function parses the JSON array of candidate objects from the prompt and
 returns the last candidate (most recent in the prompt's construction).

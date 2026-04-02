@@ -364,7 +364,7 @@ def extract_entities(quads: Sequence) -> list[str]:
     """Extract the sorted unique entity set from loaded quadruples.
 
     *quads* is a sequence of ``Quadruple`` objects (from
-    ``Code.preprocessing``) or plain 4-tuples.
+    ``preprocessing``) or plain 4-tuples.
     """
     entities: set[str] = set()
     for q in quads:
@@ -390,7 +390,7 @@ if __name__ == "__main__":
     if _project_root not in sys.path:
         sys.path.insert(0, _project_root)
 
-    from Code.preprocessing import load_dataset  # noqa: E402
+    from preprocessing import load_dataset  # noqa: E402
 
     data_dir = sys.argv[1] if len(sys.argv) > 1 else str(
         Path(__file__).resolve().parent.parent / "data" / "ICEWS05-15"

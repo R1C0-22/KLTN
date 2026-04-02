@@ -3,7 +3,7 @@ Unified LLM interface for this project.
 
 Supports multiple providers behind a single function:
 
-    from Code.llm import call_llm
+    from llm import call_llm
     text = call_llm("Your prompt here")
 
 Currently supported providers

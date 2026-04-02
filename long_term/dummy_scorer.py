@@ -1,7 +1,7 @@
 """
 Dummy LLM scorer for local testing.
 
-Sets `LLM_SCORER="Code.long_term.dummy_scorer:score_fn"` to enable
+Sets `LLM_SCORER="long_term.dummy_scorer:score_fn"` to enable
 `compute_scores_with_llm(history)` without an actual LLM/API call.
 """
 

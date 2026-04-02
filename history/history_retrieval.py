@@ -6,7 +6,7 @@ Implements:
   - filter_by_relation(history, relation): keep only events with a specific relation
 
 Both functions are designed to work with either:
-  - Quadruple objects returned by `Code.preprocessing.load_dataset`, or
+  - Quadruple objects returned by `preprocessing.load_dataset`, or
   - Plain 4-tuples: (subject, relation, object, timestamp)
 """
 

@@ -2,7 +2,7 @@
 Dummy LLM generator for local testing.
 
 Sets:
-  LLM_GENERATOR="Code.analogical.dummy_generator:generate_fn"
+  LLM_GENERATOR="analogical.dummy_generator:generate_fn"
 """
 
 from __future__ import annotations
