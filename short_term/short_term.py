@@ -16,46 +16,7 @@ from __future__ import annotations
 from datetime import datetime
 from typing import Any, Sequence
 
-
-def _event_fields(event: Any) -> tuple[str, str, str, str]:
-    """Extract (s, r, o, t) from either a Quadruple or a 4-tuple."""
-    if (
-        hasattr(event, "subject")
-        and hasattr(event, "relation")
-        and hasattr(event, "object")
-        and hasattr(event, "timestamp")
-    ):
-        return (
-            str(event.subject),
-            str(event.relation),
-            str(event.object),
-            str(event.timestamp),
-        )
-
-    if isinstance(event, (tuple, list)) and len(event) >= 4:
-        s, r, o, t = event[0], event[1], event[2], event[3]
-        return str(s), str(r), str(o), str(t)
-
-    raise TypeError(
-        "Unsupported event type. Expected a Quadruple-like object with "
-        "(subject, relation, object, timestamp) or a 4-tuple/list (s, r, o, t)."
-    )
-
-
-def _parse_timestamp(ts: str) -> datetime | None:
-    """Parse common ICEWS/GDELT timestamp formats for sorting."""
-    ts = str(ts).strip()
-    for fmt in (
-        "%Y-%m-%d",
-        "%Y/%m/%d",
-        "%Y-%m-%dT%H:%M:%S",
-        "%d/%m/%Y",
-    ):
-        try:
-            return datetime.strptime(ts, fmt)
-        except ValueError:
-            continue
-    return None
+from Code.common import event_fields, parse_timestamp
 
 
 def get_short_term(history: Sequence[Any], l: int = 20) -> list[Any]:
@@ -82,8 +43,8 @@ def get_short_term(history: Sequence[Any], l: int = 20) -> list[Any]:
 
     sortable: list[tuple[int, Any, datetime | None, str]] = []
     for idx, ev in enumerate(history):
-        _, _, _, t = _event_fields(ev)
-        dt = _parse_timestamp(t)
+        _, _, _, t = event_fields(ev)
+        dt = parse_timestamp(t)
         sortable.append((idx, ev, dt, str(t)))
 
     # Primary sort: parsed timestamp presence (None goes last)

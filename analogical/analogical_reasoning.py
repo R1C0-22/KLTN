@@ -65,9 +65,9 @@ def _load_prompt_template() -> str:
 def _load_llm_generator_from_env() -> Callable[[str], str]:
     spec = os.environ.get("LLM_GENERATOR", "").strip()
     if not spec:
-        # Permanent default: use local Ollama adapter.
-        # You can override by setting LLM_GENERATOR.
-        spec = "Code.llm.ollama_adapter:generate_fn"
+        # Default to cloud adapter which uses `Code.llm.call_llm`.
+        # On Colab, configure LLM_PROVIDER / OPENAI_* / GROQ_* env vars.
+        spec = "Code.llm.cloud_adapter:generate_fn"
     if ":" not in spec:
         raise ValueError("LLM_GENERATOR must be in format 'module_path:function_name'.")
 

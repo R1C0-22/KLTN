@@ -20,6 +20,8 @@ from datetime import datetime
 from pathlib import Path
 from typing import Any, Callable, Sequence
 
+from Code.common import parse_timestamp
+
 
 def _event_fields(event: Any) -> tuple[str, str, str, str]:
     """Extract (s, r, o, t) from either a Quadruple-like object or a tuple."""
@@ -46,29 +48,14 @@ def _event_fields(event: Any) -> tuple[str, str, str, str]:
     raise TypeError("query_event must be Quadruple-like or a tuple/list (s,r,o,t).")
 
 
-def _parse_timestamp(ts: str) -> datetime | None:
-    ts = str(ts).strip()
-    for fmt in (
-        "%Y-%m-%d",
-        "%Y/%m/%d",
-        "%Y-%m-%dT%H:%M:%S",
-        "%d/%m/%Y",
-    ):
-        try:
-            return datetime.strptime(ts, fmt)
-        except ValueError:
-            continue
-    return None
-
-
 def _load_callable_from_env(var_name: str) -> Callable[[str], str]:
     spec = os.environ.get(var_name, "").strip()
     if not spec:
-        # Permanent defaults: use local Ollama adapter.
+        # Use cloud adapter by default (backed by `Code.llm.call_llm`).
         if var_name == "LLM_PREDICTOR":
-            spec = "Code.llm.ollama_adapter:predict_fn"
+            spec = "Code.llm.cloud_adapter:predict_fn"
         elif var_name == "LLM_GENERATOR":
-            spec = "Code.llm.ollama_adapter:generate_fn"
+            spec = "Code.llm.cloud_adapter:generate_fn"
         else:
             raise EnvironmentError(
                 f"{var_name} is not set and no default is configured."
@@ -201,7 +188,7 @@ def predict_next_object(query_event: Any) -> str:
     # We score the relation-filtered history using the masked query event as the Question.
     masked_query_event = (s, r, "?", t)
     scores = compute_scores_with_llm(rel_history, masked_query_event)
-    long_filtered = filter_long_term(rel_history, scores)
+    long_filtered = filter_long_term(rel_history, scores, query_time=t)
 
     # Similar events for analogical reasoning: use last m from the long-term filtered set.
     m = int(os.environ.get("ANALOGICAL_SIMILAR_M", "3"))
@@ -229,7 +216,7 @@ def predict_next_object(query_event: Any) -> str:
 
     candidates_json = json.dumps(candidate_objects, ensure_ascii=False)
 
-    # Verbalize histories for final prompt
+    # Verbalize histories for final prompt (Table 9-style placeholders)
     short_lines = []
     for i, ev in enumerate(short_history, start=1):
         ev_s, ev_r, ev_o, ev_t = _event_fields(ev)
@@ -240,25 +227,24 @@ def predict_next_object(query_event: Any) -> str:
         ev_s, ev_r, ev_o, ev_t = _event_fields(ev)
         long_lines.append(f"{i}. {verbalize_event(ev_s, ev_r, ev_o, ev_t)}")
 
+    # Build query sentence with masked object, then feed into prediction prompt.
     query_sentence = _verbalize_query_with_mask(s, r, t, mask=mask)
 
-    final_prompt = (
-        "You are solving a Temporal Knowledge Graph Forecasting task.\n\n"
-        f"Query (missing object): {query_sentence}\n\n"
-        "Candidate objects are provided. Predict the most likely object entity for the query.\n"
-        f"Candidate Objects: {candidates_json}\n\n"
-        "Short-term History (most recent events):\n"
-        + ("\n".join(short_lines) if short_lines else "- none -")
-        + "\n\n"
-        "Long-term Filtered History (LLM-scored):\n"
-        + ("\n".join(long_lines) if long_lines else "- none -")
-        + "\n\n"
-        "Analogical Reasoning (for similar events):\n"
-        + analogical_reasoning
-        + "\n\n"
-        "Task:\n"
-        "Return exactly ONE object entity string selected from Candidate Objects.\n"
-        "Output ONLY the entity string (no quotes, no extra text)."
+    # Load prediction prompt template (Table 9) and fill placeholders.
+    prompt_path = Path(__file__).resolve().parent.parent.parent / "prompts" / "prediction_prompt.txt"
+    if not prompt_path.is_file():
+        raise FileNotFoundError(
+            f"Missing prediction prompt template: {prompt_path}. "
+            "Please create `prompts/prediction_prompt.txt` as described in REQUESTS.MD."
+        )
+    prediction_template = prompt_path.read_text(encoding="utf-8")
+
+    final_prompt = prediction_template.format(
+        short_term="\n".join(short_lines) if short_lines else "- none -",
+        long_term="\n".join(long_lines) if long_lines else "- none -",
+        reasoning=analogical_reasoning,
+        query=query_sentence,
+        candidates=candidates_json,
     )
 
     # Call predictor LLM

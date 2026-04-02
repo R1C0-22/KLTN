@@ -42,42 +42,12 @@ from datetime import datetime
 from pathlib import Path
 from typing import Any, Iterable, Sequence
 
-
-def _event_timestamp(event: Any) -> str:
-    if hasattr(event, "timestamp"):
-        return str(event.timestamp)
-    if isinstance(event, (tuple, list)) and len(event) >= 4:
-        return str(event[3])
-    raise TypeError("Event must be Quadruple-like (timestamp attribute) or a 4-tuple/list.")
-
-
-def _parse_timestamp(ts: str) -> datetime | None:
-    ts = str(ts).strip()
-    for fmt in (
-        "%Y-%m-%d",
-        "%Y/%m/%d",
-        "%Y-%m-%dT%H:%M:%S",
-        "%d/%m/%Y",
-    ):
-        try:
-            return datetime.strptime(ts, fmt)
-        except ValueError:
-            continue
-    return None
+from Code.common import event_fields, parse_timestamp
 
 
 def _extract_event_fields(event: Any) -> tuple[str, str, str, str]:
-    if (
-        hasattr(event, "subject")
-        and hasattr(event, "relation")
-        and hasattr(event, "object")
-        and hasattr(event, "timestamp")
-    ):
-        return (str(event.subject), str(event.relation), str(event.object), str(event.timestamp))
-    if isinstance(event, (tuple, list)) and len(event) >= 4:
-        s, r, o, t = event[0], event[1], event[2], event[3]
-        return str(s), str(r), str(o), str(t)
-    raise TypeError("Event must be Quadruple-like or a 4-tuple/list (s,r,o,t).")
+    # Delegate to the shared helper for standard Quadruple / tuple events.
+    return event_fields(event)
 
 
 def _softmax(logits: Sequence[float]) -> list[float]:
@@ -104,9 +74,9 @@ def _load_prompt_template() -> str:
 def _load_llm_scorer_from_env() -> Any:
     spec = os.environ.get("LLM_SCORER", "").strip()
     if not spec:
-        # Permanent default: use local Ollama adapter.
-        # You can override by setting LLM_SCORER.
-        spec = "Code.llm.ollama_adapter:score_fn"
+        # Default to cloud adapter which uses `Code.llm.call_llm`.
+        # On Colab, configure LLM_PROVIDER / OPENAI_* / GROQ_* env vars.
+        spec = "Code.llm.cloud_adapter:score_fn"
 
     if ":" not in spec:
         raise ValueError("LLM_SCORER must be in format 'module_path:function_name'.")
@@ -247,6 +217,8 @@ def dynamic_threshold(F: int, delta_t: float, T: float, alpha: float) -> float:
 def filter_long_term(
     history: Sequence[Any],
     scores: Sequence[float],
+    *,
+    query_time: str | None = None,
 ) -> list[Any]:
     """Filter long-term history events using dynamic thresholds.
 
@@ -266,8 +238,8 @@ def filter_long_term(
     # Parse timestamps for ordering and for Δt/T computations.
     parsed: list[tuple[int, Any, float | None]] = []
     for idx, ev in enumerate(history):
-        ts = _event_timestamp(ev)
-        dt = _parse_timestamp(ts)
+        _, _, _, ts = event_fields(ev)
+        dt = parse_timestamp(ts)
         parsed.append((idx, ev, dt.timestamp() if dt is not None else None))
 
     # Keep only parseable timestamps for dynamic threshold computation.
@@ -276,9 +248,20 @@ def filter_long_term(
     if not ts_values:
         return list(history)
 
+    # Use explicit query time t_q when provided; otherwise fall back to the
+    # latest timestamp in history (backwards compatible but less faithful).
+    if query_time is not None:
+        q_dt = parse_timestamp(query_time)
+        if q_dt is None:
+            # If query_time is malformed, degrade gracefully to history-based t_q.
+            t_q = max(ts_values)
+        else:
+            t_q = q_dt.timestamp()
+    else:
+        t_q = max(ts_values)
+
     t_min = min(ts_values)
-    t_max = max(ts_values)  # Treat as query time in the absence of explicit t_q.
-    T = t_max - t_min
+    T = t_q - t_min
     if T <= 0:
         return list(history)
 
@@ -294,7 +277,7 @@ def filter_long_term(
     thresholds: dict[float, float] = {}
     for sec, idxs in groups.items():
         F = len(idxs)
-        delta_t = t_max - sec
+        delta_t = t_q - sec
         thresholds[sec] = dynamic_threshold(F=F, delta_t=delta_t, T=T, alpha=alpha)
 
     # Filter by comparing each event's within-group softmax probability
@@ -311,7 +294,7 @@ def filter_long_term(
     # Return in chronological order.
     chronological = sorted(
         [
-            (i, ev, _parse_timestamp(_event_timestamp(ev)) or datetime.min)
+            (i, ev, parse_timestamp(event_fields(ev)[3]) or datetime.min)
             for i, ev, _ in parsed
         ],
         key=lambda x: x[2],

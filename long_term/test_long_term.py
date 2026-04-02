@@ -40,7 +40,9 @@ def main() -> None:
     scores = compute_scores_with_llm(history, query_event)
     assert len(scores) == len(history)
 
-    filtered = filter_long_term(history, scores)
+    # Use the query timestamp as t_q for dynamic thresholding, following the
+    # paper's definition.
+    filtered = filter_long_term(history, scores, query_time=query_event[3])
     print("scores:", [round(x, 4) for x in scores])
     print("filtered:", filtered)
 

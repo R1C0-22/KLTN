@@ -12,43 +12,9 @@ Both functions are designed to work with either:
 
 from __future__ import annotations
 
-from dataclasses import is_dataclass
-from datetime import datetime
 from typing import Any, Iterable, Sequence
 
-
-def _event_fields(event: Any) -> tuple[str, str, str, str]:
-    """Extract (s, r, o, t) from either a Quadruple or a 4-tuple."""
-    # Quadruple dataclass (preferred)
-    if hasattr(event, "subject") and hasattr(event, "relation") and hasattr(event, "object") and hasattr(event, "timestamp"):
-        return str(event.subject), str(event.relation), str(event.object), str(event.timestamp)
-
-    # Fallback to tuple/list
-    if isinstance(event, (tuple, list)) and len(event) >= 4:
-        s, r, o, t = event[0], event[1], event[2], event[3]
-        return str(s), str(r), str(o), str(t)
-
-    raise TypeError(
-        "Unsupported event type. Expected a Quadruple-like object with "
-        "attributes (subject, relation, object, timestamp) or a 4-tuple "
-        "(subject, relation, object, timestamp)."
-    )
-
-
-def _parse_timestamp(ts: str) -> datetime | None:
-    """Parse common ICEWS/GDELT timestamp formats for sorting."""
-    ts = str(ts).strip()
-    for fmt in (
-        "%Y-%m-%d",
-        "%Y/%m/%d",
-        "%Y-%m-%dT%H:%M:%S",
-        "%d/%m/%Y",
-    ):
-        try:
-            return datetime.strptime(ts, fmt)
-        except ValueError:
-            continue
-    return None
+from Code.common import event_fields, parse_timestamp
 
 
 def get_entity_history(entity: str, data: Sequence[Any]) -> list[Any]:
@@ -65,9 +31,9 @@ def get_entity_history(entity: str, data: Sequence[Any]) -> list[Any]:
     with_idx: list[tuple[int, Any, str, datetime | None]] = []
 
     for idx, ev in enumerate(data):
-        s, r, o, t = _event_fields(ev)
+        s, r, o, t = event_fields(ev)
         if s.strip() == needle or o.strip() == needle:
-            dt = _parse_timestamp(t)
+            dt = parse_timestamp(t)
             with_idx.append((idx, ev, t, dt))
 
     # Sort by parsed timestamp when possible; otherwise keep them after all parsed ones.
@@ -85,7 +51,7 @@ def filter_by_relation(history: Iterable[Any], relation: str) -> list[Any]:
     rel_norm = relation.strip().lower()
     filtered: list[Any] = []
     for ev in history:
-        _, r, _, _ = _event_fields(ev)
+        _, r, _, _ = event_fields(ev)
         if r.strip().lower() == rel_norm:
             filtered.append(ev)
     return filtered
