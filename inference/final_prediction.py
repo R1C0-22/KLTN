@@ -271,7 +271,9 @@ def _apply_dummy_llm_env_if_no_api_keys() -> None:
     """
     has_openai = bool(os.environ.get("OPENAI_API_KEY", "").strip())
     has_groq = bool(os.environ.get("GROQ_API_KEY", "").strip())
-    if has_openai or has_groq:
+    provider = (os.environ.get("LLM_PROVIDER") or "").strip().lower()
+    uses_local_hf = provider in ("hf", "huggingface", "local", "transformers")
+    if has_openai or has_groq or uses_local_hf:
         return
     if not os.environ.get("LLM_GENERATOR", "").strip():
         os.environ["LLM_GENERATOR"] = "analogical.dummy_generator:generate_fn"
@@ -284,7 +286,8 @@ def _apply_dummy_llm_env_if_no_api_keys() -> None:
 if __name__ == "__main__":
     # Minimal dummy run for sanity.
     # With API keys: set LLM_PROVIDER and OPENAI_* or GROQ_* (see llm/unified.py).
-    # Without keys (typical Colab first run): dummy callables are applied automatically.
+    # Local HF on Colab: LLM_PROVIDER=hf and HF_MODEL_ID=... (see llm/unified.py).
+    # Without keys / not hf: dummy callables are applied automatically.
     import sys
 
     if not os.environ.get("TKG_DATA_DIR"):

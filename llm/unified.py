@@ -10,12 +10,13 @@ Currently supported providers
 -----------------------------
 - OpenAI (chat/completions-style HTTP API)
 - Groq (Groq cloud chat API)
+- Hugging Face local (Transformers on GPU — Colab-friendly)
 
 Provider & model selection
 --------------------------
 Configuration is via environment variables:
 
-    LLM_PROVIDER=openai|groq         # which backend to use
+    LLM_PROVIDER=openai|groq|hf      # which backend to use
 
 For OpenAI:
     OPENAI_API_KEY=...               # required
@@ -27,6 +28,16 @@ For Groq:
     GROQ_BASE_URL=...                # optional, default: https://api.groq.com/openai/v1
     GROQ_MODEL=...                   # optional, default: llama-3.1-8b-instant
 
+For Hugging Face local (Colab GPU — download weights, matches paper model families):
+    LLM_PROVIDER=hf
+    HF_MODEL_ID=meta-llama/Meta-Llama-3-8B-Instruct   # or Qwen/Qwen2.5-7B-Instruct
+    HF_TOKEN=...                     # Hugging Face token (required for gated Llama)
+    HF_LOAD_IN_4BIT=1                # default on; use 0 for full FP16 if VRAM allows
+    HF_MAX_NEW_TOKENS=512
+    HF_TRUST_REMOTE_CODE=0           # set 1 only if the model card asks for it
+
+    pip install torch transformers accelerate bitsandbytes
+
 `call_llm(prompt)` always returns a plain string with the model’s text output.
 """
 
@@ -37,6 +48,13 @@ import os
 import urllib.error
 import urllib.request
 from typing import Any
+
+# ---------------------------------------------------------------------------
+# Hugging Face local cache (lazy-loaded)
+# ---------------------------------------------------------------------------
+
+_hf_model: Any = None
+_hf_tokenizer: Any = None
 
 
 # ---------------------------------------------------------------------------
@@ -53,7 +71,11 @@ def call_llm(prompt: str) -> str:
         return _call_openai(prompt).strip()
     if provider == "groq":
         return _call_groq(prompt).strip()
-    raise ValueError(f"Unsupported LLM_PROVIDER='{provider}'. Use 'openai' or 'groq'.")
+    if provider in ("hf", "huggingface", "local", "transformers"):
+        return _call_huggingface(prompt).strip()
+    raise ValueError(
+        f"Unsupported LLM_PROVIDER='{provider}'. Use 'openai', 'groq', or 'hf'."
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -154,9 +176,112 @@ def _call_groq(prompt: str) -> str:
         raise RuntimeError(f"Unexpected Groq response format: {raw[:500]}") from exc
 
 
+# ---------------------------------------------------------------------------
+# Hugging Face local backend (Colab / GPU)
+# ---------------------------------------------------------------------------
+
+def _env_truthy(name: str, default: bool = False) -> bool:
+    v = os.environ.get(name, "").strip().lower()
+    if not v:
+        return default
+    return v in ("1", "true", "yes", "on")
+
+
+def _load_huggingface_model(model_id: str) -> None:
+    """Load model + tokenizer once (4-bit by default for Colab T4)."""
+    global _hf_model, _hf_tokenizer
+
+    import torch
+    from transformers import AutoModelForCausalLM, AutoTokenizer
+
+    token = os.environ.get("HF_TOKEN", "").strip() or None
+    trust_remote = _env_truthy("HF_TRUST_REMOTE_CODE", False)
+    load_4bit = _env_truthy("HF_LOAD_IN_4BIT", True)
+
+    tokenizer = AutoTokenizer.from_pretrained(
+        model_id,
+        token=token,
+        trust_remote_code=trust_remote,
+    )
+    if tokenizer.pad_token_id is None and tokenizer.eos_token_id is not None:
+        tokenizer.pad_token = tokenizer.eos_token
+
+    model_kwargs: dict[str, Any] = dict(
+        device_map="auto",
+        token=token,
+        trust_remote_code=trust_remote,
+    )
+    if load_4bit:
+        try:
+            from transformers import BitsAndBytesConfig
+
+            model_kwargs["quantization_config"] = BitsAndBytesConfig(
+                load_in_4bit=True,
+                bnb_4bit_compute_dtype=torch.bfloat16
+                if torch.cuda.is_bf16_supported()
+                else torch.float16,
+            )
+        except Exception:
+            model_kwargs.pop("quantization_config", None)
+
+    model = AutoModelForCausalLM.from_pretrained(model_id, **model_kwargs)
+    _hf_model = model
+    _hf_tokenizer = tokenizer
+
+
+def _call_huggingface(prompt: str) -> str:
+    global _hf_model, _hf_tokenizer
+
+    model_id = os.environ.get("HF_MODEL_ID", "").strip()
+    if not model_id:
+        raise EnvironmentError(
+            "HF_MODEL_ID is not set. Examples (AnRe-style families): "
+            "meta-llama/Meta-Llama-3-8B-Instruct, Qwen/Qwen2.5-7B-Instruct"
+        )
+
+    if _hf_model is None or _hf_tokenizer is None:
+        _load_huggingface_model(model_id)
+
+    import torch
+
+    model = _hf_model
+    tokenizer = _hf_tokenizer
+    messages = [{"role": "user", "content": prompt}]
+
+    if getattr(tokenizer, "chat_template", None):
+        input_ids = tokenizer.apply_chat_template(
+            messages,
+            add_generation_prompt=True,
+            return_tensors="pt",
+        )
+    else:
+        input_ids = tokenizer(prompt, return_tensors="pt").input_ids
+
+    if not torch.is_tensor(input_ids):
+        input_ids = torch.tensor(input_ids)
+    device = next(model.parameters()).device
+    input_ids = input_ids.to(device)
+
+    max_new = int(os.environ.get("HF_MAX_NEW_TOKENS", "512"))
+    do_sample = _env_truthy("HF_DO_SAMPLE", False)
+    gen_kwargs: dict[str, Any] = dict(
+        max_new_tokens=max_new,
+        do_sample=do_sample,
+        pad_token_id=tokenizer.pad_token_id,
+    )
+    if do_sample:
+        gen_kwargs["temperature"] = float(os.environ.get("HF_TEMPERATURE", "0.2"))
+
+    with torch.no_grad():
+        out = model.generate(input_ids, **gen_kwargs)
+
+    new_tokens = out[0, input_ids.shape[1] :]
+    return tokenizer.decode(new_tokens, skip_special_tokens=True)
+
+
 if __name__ == "__main__":
     # Simple manual test:
-    #   set LLM_PROVIDER, OPENAI_* or GROQ_* env vars, then run:
+    #   set LLM_PROVIDER and OPENAI_* / GROQ_* / HF_* env vars, then run:
     #   python -m llm.unified
     test_prompt = "Say 'hello' and nothing else."
     print(call_llm(test_prompt))
