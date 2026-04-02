@@ -520,8 +520,11 @@ def _load_icews_id_directory(
                     raw_o = ent_map.get(o_id, o_id_str)
                     # Normalize relation string to align with RELATION_TEMPLATES.
                     r = raw_r.replace("_", " ").lower().strip()
-                    s = raw_s
-                    o = raw_o
+                    # Normalize entity names for readability and for matching
+                    # multi-word probes like "Barack Obama" (dataset uses
+                    # "Barack_Obama").
+                    s = _pretty_entity(raw_s)
+                    o = _pretty_entity(raw_o)
                     t = t_id_str  # keep numeric time ID; _format_date will map it
 
                 quads.append(Quadruple(s, r, o, t))
