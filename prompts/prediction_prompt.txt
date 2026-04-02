@@ -11,5 +11,8 @@ Analogical reasoning:
 Predict the missing entity in:
 {query}
 
-Return only the predicted entity.
+Candidate objects (JSON array):
+{candidates}
+
+Return only the predicted entity name from the candidate list (or the best match if none).
 

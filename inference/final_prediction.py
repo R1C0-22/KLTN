@@ -263,18 +263,36 @@ def predict_next_object(query_event: Any) -> str:
     return _extract_predicted_object(str(llm_output), candidate_objects)
 
 
+def _apply_dummy_llm_env_if_no_api_keys() -> None:
+    """Use built-in dummy LLM callables when no cloud API key is set (e.g. Colab smoke test).
+
+    AnRe (paper) assumes real LLM calls for scoring, analogical replay, and prediction.
+    For integration checks without keys, set dummy modules so the pipeline completes.
+    """
+    has_openai = bool(os.environ.get("OPENAI_API_KEY", "").strip())
+    has_groq = bool(os.environ.get("GROQ_API_KEY", "").strip())
+    if has_openai or has_groq:
+        return
+    if not os.environ.get("LLM_GENERATOR", "").strip():
+        os.environ["LLM_GENERATOR"] = "analogical.dummy_generator:generate_fn"
+    if not os.environ.get("LLM_SCORER", "").strip():
+        os.environ["LLM_SCORER"] = "long_term.dummy_scorer:score_fn"
+    if not os.environ.get("LLM_PREDICTOR", "").strip():
+        os.environ["LLM_PREDICTOR"] = "inference.dummy_predictor:predict_fn"
+
+
 if __name__ == "__main__":
     # Minimal dummy run for sanity.
-    # Set:
-    #   - LLM_GENERATOR for analogical reasoning generation
-    #   - LLM_SCORER for long-term scoring
-    #   - LLM_PREDICTOR for final prediction (or LLM_GENERATOR fallback)
+    # With API keys: set LLM_PROVIDER and OPENAI_* or GROQ_* (see llm/unified.py).
+    # Without keys (typical Colab first run): dummy callables are applied automatically.
     import sys
 
     if not os.environ.get("TKG_DATA_DIR"):
         # If user runs directly, point to ICEWS05-15 under the project root by default.
         code_root = Path(__file__).resolve().parents[1]
         os.environ["TKG_DATA_DIR"] = str(code_root / "data" / "ICEWS05-15")
+
+    _apply_dummy_llm_env_if_no_api_keys()
 
     # This is a placeholder query event.
     q = ("China", "meet", "?", "2014-01-01")

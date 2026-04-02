@@ -16,8 +16,14 @@ from typing import Sequence
 
 
 def predict_fn(prompt: str) -> str:
-    # Look for: Candidate Objects: [...]
-    m = re.search(r"Candidate Objects:\s*(\[[\s\S]*?\])", prompt)
+    # Look for JSON array after candidate label (template uses "Candidate objects (JSON array):")
+    m = re.search(
+        r"Candidate objects[^\[]*(\[[\s\S]*?\])",
+        prompt,
+        re.IGNORECASE | re.DOTALL,
+    )
+    if not m:
+        m = re.search(r"Candidate Objects:\s*(\[[\s\S]*?\])", prompt, re.IGNORECASE)
     if not m:
         return "UNKNOWN"
     try:
