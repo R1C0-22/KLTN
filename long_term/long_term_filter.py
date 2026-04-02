@@ -61,8 +61,9 @@ def _softmax(logits: Sequence[float]) -> list[float]:
 
 
 def _load_prompt_template() -> str:
-    repo_root = Path(__file__).resolve().parent.parent.parent
-    prompt_path = repo_root / "prompts" / "filter_prompt.txt"
+    # `Code/` is the project root; prompts live under `Code/prompts/`.
+    code_root = Path(__file__).resolve().parents[1]
+    prompt_path = code_root / "prompts" / "filter_prompt.txt"
     if not prompt_path.is_file():
         raise FileNotFoundError(
             f"Missing prompt template: {prompt_path}. "

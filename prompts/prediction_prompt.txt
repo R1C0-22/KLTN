@@ -1,0 +1,15 @@
+Given:
+Short-term history:
+{short_term}
+
+Long-term history:
+{long_term}
+
+Analogical reasoning:
+{reasoning}
+
+Predict the missing entity in:
+{query}
+
+Return only the predicted entity.
+

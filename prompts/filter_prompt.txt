@@ -1,0 +1,16 @@
+There is a question and some historical events. Please select the historical event that is most helpful in
+answering this question from these historical events.
+
+Question:
+{query}
+
+Historical events:
+{history}
+
+Your choice is:
+
+IMPORTANT (for this codebase):
+- Instead of returning a single number, return a JSON array of real-valued logits aligned with the historical
+  events above (one logit per line, in the same order).
+- Output ONLY the JSON array. No extra text.
+

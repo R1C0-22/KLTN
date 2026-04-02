@@ -231,7 +231,9 @@ def predict_next_object(query_event: Any) -> str:
     query_sentence = _verbalize_query_with_mask(s, r, t, mask=mask)
 
     # Load prediction prompt template (Table 9) and fill placeholders.
-    prompt_path = Path(__file__).resolve().parent.parent.parent / "prompts" / "prediction_prompt.txt"
+    # `Code/` is the project root; prompts live under `Code/prompts/`.
+    code_root = Path(__file__).resolve().parents[1]
+    prompt_path = code_root / "prompts" / "prediction_prompt.txt"
     if not prompt_path.is_file():
         raise FileNotFoundError(
             f"Missing prediction prompt template: {prompt_path}. "
@@ -270,10 +272,9 @@ if __name__ == "__main__":
     import sys
 
     if not os.environ.get("TKG_DATA_DIR"):
-        # If user runs directly, point to ICEWS05-15 by default.
-        os.environ["TKG_DATA_DIR"] = str(
-            Path(__file__).resolve().parent.parent.parent / "data" / "ICEWS05-15"
-        )
+        # If user runs directly, point to ICEWS05-15 under the Code/ root by default.
+        code_root = Path(__file__).resolve().parents[1]
+        os.environ["TKG_DATA_DIR"] = str(code_root / "data" / "ICEWS05-15")
 
     # This is a placeholder query event.
     q = ("China", "meet", "?", "2014-01-01")

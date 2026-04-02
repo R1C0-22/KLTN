@@ -1,0 +1,16 @@
+Here are some time-ordered historical event chains and a question. Please analyze how the answer
+to the question can be derived based on the historical development process in the event chain.
+
+Historical Events:
+{similar_events}
+
+Question:
+{event}
+
+Your Analysis:
+
+Requirements:
+- Write short, structured reasoning steps (3–8 bullet points).
+- Use only the information implied by the historical events.
+- Do not output candidate lists or multiple answers; only provide reasoning text.
+
