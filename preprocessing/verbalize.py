@@ -385,11 +385,22 @@ def _load_directory(
       (entity_id, relation_id, entity_id, time_id) with separate mapping
       files ``entity2id.txt`` and ``relation2id.txt`` in the same directory.
     """
+    def _resolve_split_files(names: Sequence[str]) -> list[Path]:
+        """Return existing split files, accepting bare names and *.txt."""
+        files: list[Path] = []
+        for name in names:
+            base = dirpath / name
+            txt = dirpath / f"{name}.txt"
+            if base.is_file():
+                files.append(base)
+            elif txt.is_file():
+                files.append(txt)
+        return files
+
     if splits is None:
-        candidates = [dirpath / name for name in _SPLIT_NAMES]
-        split_files = [p for p in candidates if p.is_file()]
+        split_files = _resolve_split_files(_SPLIT_NAMES)
     else:
-        split_files = [dirpath / name for name in splits]
+        split_files = _resolve_split_files(list(splits))
 
     if not split_files:
         raise FileNotFoundError(
