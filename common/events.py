@@ -13,7 +13,7 @@ Keeping these helpers in one place avoids subtle inconsistencies and
 duplicate timestamp format lists scattered around the codebase.
 """
 
-from datetime import datetime
+from datetime import datetime, timedelta
 from typing import Any, Tuple
 
 
@@ -56,6 +56,12 @@ def parse_timestamp(ts: str) -> datetime | None:
     Returns `datetime` or None if parsing fails.
     """
     ts = str(ts).strip()
+    # ICEWS/GDELT preprocessing in this repo sometimes keeps time as an
+    # integer snapshot id (e.g. "0", "12", ...). Treat those as ordered
+    # timesteps by mapping them to a monotonically increasing datetime.
+    if ts.isdigit():
+        seconds = int(ts)
+        return datetime(1970, 1, 1) + timedelta(seconds=seconds)
     for fmt in (
         "%Y-%m-%d",
         "%Y/%m/%d",

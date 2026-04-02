@@ -297,7 +297,17 @@ if __name__ == "__main__":
 
     _apply_dummy_llm_env_if_no_api_keys()
 
-    # This is a placeholder query event.
-    q = ("China", "meet", "?", "2014-01-01")
+    # Smoke-run query: pick a real query event from the dataset itself so
+    # that there is guaranteed training history before the query time.
+    # This keeps the debug run meaningful and avoids empty candidate lists.
+    from preprocessing import load_dataset
+
+    data_dir = os.environ["TKG_DATA_DIR"]
+    valid_quads = load_dataset(data_dir, splits=["valid"])
+    test_quads = load_dataset(data_dir, splits=["test"])
+    train_quads = load_dataset(data_dir, splits=["train"])
+
+    query_quad = valid_quads[0] if valid_quads else (test_quads[0] if test_quads else train_quads[0])
+    q = (query_quad.subject, query_quad.relation, "?", query_quad.timestamp)
     print(predict_next_object(q))
 
