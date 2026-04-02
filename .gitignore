@@ -2,3 +2,5 @@ data/
 CHAT_SUMMARY.md
 REQUESTS.MD
 output.txt
+__pycache__/
+*.pyc
