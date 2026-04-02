@@ -128,7 +128,21 @@ def embed_entities(
     else:
         texts = list(entity_list)
 
-    model = SentenceTransformer(model_name, device=device)
+    # Reduce HuggingFace Hub noise + avoid rate limits by authenticating
+    # when the user provides an HF token in Colab.
+    hf_token = os.environ.get("HF_TOKEN", "").strip() or os.environ.get(
+        "HUGGINGFACE_HUB_TOKEN", ""
+    ).strip()
+    if hf_token:
+        try:
+            model = SentenceTransformer(model_name, device=device, token=hf_token)
+        except TypeError:
+            # Backwards compatibility with older SentenceTransformers versions.
+            model = SentenceTransformer(
+                model_name, device=device, use_auth_token=hf_token
+            )
+    else:
+        model = SentenceTransformer(model_name, device=device)
     embeddings = model.encode(
         texts,
         batch_size=batch_size,
