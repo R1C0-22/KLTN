@@ -105,26 +105,17 @@ def _make_question_from_query_event(query_event: Any) -> str:
     if masked_sentence.endswith("."):
         masked_sentence = masked_sentence[:-1]
 
-    # Heuristic question conversion depending on connector near the mask.
-    # Prefer "whom" because objects are entities in TKG.
-    lower = masked_sentence.lower()
-    if lower.endswith(" with ?"):
-        return masked_sentence[:-2] + "whom?"
-    if lower.endswith(" to ?"):
-        return masked_sentence[:-2] + "whom?"
-    if lower.endswith(" by ?"):
-        return masked_sentence[:-2] + "whom?"
-    if lower.endswith(" from ?"):
-        return masked_sentence[:-2] + "whom?"
-    if lower.endswith(" against ?"):
-        return masked_sentence[:-2] + "whom?"
-    if lower.endswith(" about ?"):
-        return masked_sentence[:-2] + "what?"
+    # Convert the tail "... ?" into "... whom?" (or "... what?").
+    # We avoid slice-based string replacement (which can drop the needed
+    # whitespace, producing tokens like "endorsedwhom?").
+    import re
 
-    # Generic fallback.
-    if masked_sentence.endswith(" ?"):
-        return masked_sentence[:-2] + "whom?"
-    return masked_sentence + " Whom?"
+    lower = masked_sentence.lower()
+    if lower.endswith(" about ?"):
+        return re.sub(r"\s*\?\s*$", " what?", masked_sentence, flags=re.I)
+
+    # Default: objects are entities in TKG => "whom?"
+    return re.sub(r"\s*\?\s*$", " whom?", masked_sentence, flags=re.I)
 
 
 def compute_scores_with_llm(history: Sequence[Any], query_event: Any) -> list[float]:

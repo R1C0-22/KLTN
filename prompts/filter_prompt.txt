@@ -10,7 +10,9 @@ Historical events:
 Your choice is:
 
 IMPORTANT (for this codebase):
-- Instead of returning a single number, return a JSON array of real-valued logits aligned with the historical
-  events above (one logit per line, in the same order).
+- Output ONLY a JSON array of exactly {n} floats.
+- The i-th float corresponds to the i-th historical event in the order shown above.
+- Larger float means the historical event is more helpful for answering the question.
+- Do NOT output all zeros; even if uncertain, add small differences between values.
 - Output ONLY the JSON array. No extra text.
 
