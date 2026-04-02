@@ -14,7 +14,7 @@ from __future__ import annotations
 
 from typing import Any, Iterable, Sequence
 
-from Code.common import event_fields, parse_timestamp
+from common import event_fields, parse_timestamp
 
 
 def get_entity_history(entity: str, data: Sequence[Any]) -> list[Any]:

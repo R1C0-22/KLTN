@@ -22,13 +22,12 @@ from pathlib import Path
 
 
 def main() -> None:
-    # Ensure `import Code.*` works when running this file directly:
-    #   python Code\inference\run_ollama_demo.py
-    _project_root = str(Path(__file__).resolve().parent.parent.parent)
+    # Ensure imports work when running this file directly from the project root.
+    _project_root = str(Path(__file__).resolve().parents[1])
     if _project_root not in sys.path:
         sys.path.insert(0, _project_root)
 
-    from Code.inference import predict_next_object
+    from inference import predict_next_object
 
     # Pick a small model for your 4GB VRAM.
     if "OLLAMA_MODEL" not in os.environ:

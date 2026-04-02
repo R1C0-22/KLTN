@@ -8,17 +8,16 @@ import os
 import sys
 from pathlib import Path
 
-# Make sure `import Code.*` works when running this file directly:
-#   python Code\analogical\test_analogical.py
-_project_root = str(Path(__file__).resolve().parent.parent.parent)
+# Allow running this file directly from the project root.
+_project_root = str(Path(__file__).resolve().parents[1])
 if _project_root not in sys.path:
     sys.path.insert(0, _project_root)
 
-from Code.analogical import generate_analogical_reasoning  # noqa: E402
+from analogical import generate_analogical_reasoning  # noqa: E402
 
 
 def main() -> None:
-    os.environ.setdefault("LLM_GENERATOR", "Code.analogical.dummy_generator:generate_fn")
+    os.environ.setdefault("LLM_GENERATOR", "analogical.dummy_generator:generate_fn")
 
     event = ("USA", "meet", "China", "2014-01-01")
     similar_events = [

@@ -12,13 +12,12 @@ import os
 import sys
 from pathlib import Path
 
-# Make sure `import Code.*` works when running this file directly:
-#   python Code\long_term\test_long_term.py
-_project_root = str(Path(__file__).resolve().parent.parent.parent)
+# Allow running this file directly from the project root.
+_project_root = str(Path(__file__).resolve().parents[1])
 if _project_root not in sys.path:
     sys.path.insert(0, _project_root)
 
-from Code.long_term import compute_scores_with_llm, filter_long_term
+from long_term import compute_scores_with_llm, filter_long_term
 
 
 def main() -> None:

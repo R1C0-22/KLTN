@@ -11,13 +11,12 @@ from dataclasses import dataclass
 import sys
 from pathlib import Path
 
-# Ensure `import Code.*` works when running this file directly:
-#   python Code\inference\test_prediction_dummy.py
-_project_root = str(Path(__file__).resolve().parents[2])
+# Ensure imports work when running this file directly from the project root.
+_project_root = str(Path(__file__).resolve().parents[1])
 if _project_root not in sys.path:
     sys.path.insert(0, _project_root)
 
-from Code.inference import predict_next_object
+from inference import predict_next_object
 
 
 @dataclass
@@ -30,9 +29,9 @@ class QueryEvent:
 
 
 def main() -> None:
-    os.environ["LLM_GENERATOR"] = "Code.analogical.dummy_generator:generate_fn"
-    os.environ["LLM_SCORER"] = "Code.long_term.dummy_scorer:score_fn"
-    os.environ["LLM_PREDICTOR"] = "Code.inference.dummy_predictor:predict_fn"
+    os.environ["LLM_GENERATOR"] = "analogical.dummy_generator:generate_fn"
+    os.environ["LLM_SCORER"] = "long_term.dummy_scorer:score_fn"
+    os.environ["LLM_PREDICTOR"] = "inference.dummy_predictor:predict_fn"
 
     # Synthetic temporal KG (quadruples)
     data = [

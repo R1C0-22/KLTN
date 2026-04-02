@@ -30,7 +30,7 @@ def _event_to_text(ev: Any) -> str:
     ):
         # Prefer natural-language verbalization if available.
         try:
-            from Code.preprocessing import verbalize_event  # local import
+            from preprocessing import verbalize_event  # local import
 
             return verbalize_event(
                 str(ev.subject),
@@ -43,7 +43,7 @@ def _event_to_text(ev: Any) -> str:
     if isinstance(ev, (tuple, list)) and len(ev) >= 4:
         s, r, o, t = ev[0], ev[1], ev[2], ev[3]
         try:
-            from Code.preprocessing import verbalize_event  # local import
+            from preprocessing import verbalize_event  # local import
 
             return verbalize_event(str(s), str(r), str(o), str(t))
         except Exception:
@@ -52,7 +52,7 @@ def _event_to_text(ev: Any) -> str:
 
 
 def _load_prompt_template() -> str:
-    # `Code/` is the project root; prompts live under `Code/prompts/`.
+    # Project root contains `prompts/` alongside this package.
     code_root = Path(__file__).resolve().parents[1]
     prompt_path = code_root / "prompts" / "reasoning_prompt.txt"
     if not prompt_path.is_file():
@@ -66,9 +66,9 @@ def _load_prompt_template() -> str:
 def _load_llm_generator_from_env() -> Callable[[str], str]:
     spec = os.environ.get("LLM_GENERATOR", "").strip()
     if not spec:
-        # Default to cloud adapter which uses `Code.llm.call_llm`.
+        # Default to cloud adapter which uses `llm.call_llm`.
         # On Colab, configure LLM_PROVIDER / OPENAI_* / GROQ_* env vars.
-        spec = "Code.llm.cloud_adapter:generate_fn"
+        spec = "llm.cloud_adapter:generate_fn"
     if ":" not in spec:
         raise ValueError("LLM_GENERATOR must be in format 'module_path:function_name'.")
 
@@ -117,7 +117,7 @@ def generate_analogical_reasoning(event: Any, similar_events: Sequence[Any]) -> 
 
 if __name__ == "__main__":
     # Local smoke test with dummy generator.
-    os.environ.setdefault("LLM_GENERATOR", "Code.analogical.dummy_generator:generate_fn")
+    os.environ.setdefault("LLM_GENERATOR", "analogical.dummy_generator:generate_fn")
     event = ("USA", "meet", "China", "2014-01-01")
     similar = [
         ("Russia", "meet", "Belarus", "2013-01-01"),

@@ -157,7 +157,7 @@ def _call_groq(prompt: str) -> str:
 if __name__ == "__main__":
     # Simple manual test:
     #   set LLM_PROVIDER, OPENAI_* or GROQ_* env vars, then run:
-    #   python -m Code.llm.unified
+    #   python -m llm.unified
     test_prompt = "Say 'hello' and nothing else."
     print(call_llm(test_prompt))
 

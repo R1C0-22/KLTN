@@ -33,8 +33,8 @@ def _separator(title: str) -> None:
 # ── test with real dataset ─────────────────────────────────────────────────
 
 def test_real(data_dir: str, max_entities: int | None = None) -> None:
-    from Code.preprocessing import load_dataset, verbalize_event, build_corpus
-    from Code.clustering import (
+    from preprocessing import load_dataset, verbalize_event, build_corpus
+    from clustering import (
         extract_entities,
         embed_entities,
         find_optimal_k,
@@ -123,7 +123,7 @@ def test_real(data_dir: str, max_entities: int | None = None) -> None:
 # ── test with synthetic data (no dataset required) ─────────────────────────
 
 def test_small() -> None:
-    from Code.clustering import embed_entities, find_optimal_k, run_kmeans
+    from clustering import embed_entities, find_optimal_k, run_kmeans
 
     _separator("Small synthetic test (no dataset needed)")
     entities = [

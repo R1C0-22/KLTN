@@ -20,7 +20,7 @@ from datetime import datetime
 from pathlib import Path
 from typing import Any, Callable, Sequence
 
-from Code.common import parse_timestamp
+from common import parse_timestamp
 
 
 def _event_fields(event: Any) -> tuple[str, str, str, str]:
@@ -51,11 +51,11 @@ def _event_fields(event: Any) -> tuple[str, str, str, str]:
 def _load_callable_from_env(var_name: str) -> Callable[[str], str]:
     spec = os.environ.get(var_name, "").strip()
     if not spec:
-        # Use cloud adapter by default (backed by `Code.llm.call_llm`).
+        # Use cloud adapter by default (backed by `llm.call_llm`).
         if var_name == "LLM_PREDICTOR":
-            spec = "Code.llm.cloud_adapter:predict_fn"
+            spec = "llm.cloud_adapter:predict_fn"
         elif var_name == "LLM_GENERATOR":
-            spec = "Code.llm.cloud_adapter:generate_fn"
+            spec = "llm.cloud_adapter:generate_fn"
         else:
             raise EnvironmentError(
                 f"{var_name} is not set and no default is configured."
@@ -153,11 +153,11 @@ def predict_next_object(query_event: Any) -> str:
       - LLM_PREDICTOR (preferred) or LLM_GENERATOR fallback:
             callable(prompt: str) -> str
     """
-    from Code.preprocessing import verbalize_event
-    from Code.history import get_entity_history, filter_by_relation
-    from Code.short_term import get_short_term
-    from Code.long_term import compute_scores_with_llm, filter_long_term
-    from Code.analogical import generate_analogical_reasoning
+    from preprocessing import verbalize_event
+    from history import get_entity_history, filter_by_relation
+    from short_term import get_short_term
+    from long_term import compute_scores_with_llm, filter_long_term
+    from analogical import generate_analogical_reasoning
 
     s, r, o, t = _event_fields(query_event)
     mask = "?" if o is None or str(o).strip() in {"?", "None", "null"} else str(o)

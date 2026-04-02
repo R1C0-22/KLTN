@@ -16,7 +16,7 @@ from __future__ import annotations
 from datetime import datetime
 from typing import Any, Sequence
 
-from Code.common import event_fields, parse_timestamp
+from common import event_fields, parse_timestamp
 
 
 def get_short_term(history: Sequence[Any], l: int = 20) -> list[Any]:

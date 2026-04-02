@@ -20,14 +20,14 @@ import sys
 from datetime import datetime
 from pathlib import Path
 
-# Ensure `import Code.*` works when running this file directly.
-_project_root = str(Path(__file__).resolve().parent.parent.parent)
+# Ensure imports work when running this file directly from the project root.
+_project_root = str(Path(__file__).resolve().parents[1])
 if _project_root not in sys.path:
     sys.path.insert(0, _project_root)
 
-from Code.preprocessing import load_dataset  # noqa: E402
-from Code.history import get_entity_history, filter_by_relation  # noqa: E402
-from Code.analogical import generate_analogical_reasoning  # noqa: E402
+from preprocessing import load_dataset  # noqa: E402
+from history import get_entity_history, filter_by_relation  # noqa: E402
+from analogical import generate_analogical_reasoning  # noqa: E402
 
 
 def _parse_date(ts: str) -> datetime | None:
@@ -42,7 +42,7 @@ def _parse_date(ts: str) -> datetime | None:
 
 def main() -> None:
     # Use the dummy generator so we have *no* external LLM dependency.
-    os.environ.setdefault("LLM_GENERATOR", "Code.analogical.dummy_generator:generate_fn")
+    os.environ.setdefault("LLM_GENERATOR", "analogical.dummy_generator:generate_fn")
 
     data_dir = Path(__file__).resolve().parent.parent / "data" / "ICEWS05-15"
 

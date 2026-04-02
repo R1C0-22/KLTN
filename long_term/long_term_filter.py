@@ -42,7 +42,7 @@ from datetime import datetime
 from pathlib import Path
 from typing import Any, Iterable, Sequence
 
-from Code.common import event_fields, parse_timestamp
+from common import event_fields, parse_timestamp
 
 
 def _extract_event_fields(event: Any) -> tuple[str, str, str, str]:
@@ -75,9 +75,9 @@ def _load_prompt_template() -> str:
 def _load_llm_scorer_from_env() -> Any:
     spec = os.environ.get("LLM_SCORER", "").strip()
     if not spec:
-        # Default to cloud adapter which uses `Code.llm.call_llm`.
+        # Default to cloud adapter which uses `llm.call_llm`.
         # On Colab, configure LLM_PROVIDER / OPENAI_* / GROQ_* env vars.
-        spec = "Code.llm.cloud_adapter:score_fn"
+        spec = "llm.cloud_adapter:score_fn"
 
     if ":" not in spec:
         raise ValueError("LLM_SCORER must be in format 'module_path:function_name'.")
