@@ -17,7 +17,7 @@
 
 ## 2) Các module và hàm đã có
 
-## `Code/preprocessing/`
+## `preprocessing/`
 
 - `load_dataset(path, splits=None)`
   - Hỗ trợ file/directory dataset (đọc được `train/test/valid` không cần extension)
@@ -26,11 +26,11 @@
 - `build_corpus(data)`
   - Sinh danh sách câu từ danh sách quadruple
 
-File chính: `Code/preprocessing/verbalize.py`
+File chính: `preprocessing/verbalize.py`
 
 ---
 
-## `Code/clustering/`
+## `clustering/`
 
 - `embed_entities(entity_list)`
   - Encode entity names bằng sentence-transformers
@@ -42,11 +42,11 @@ File chính: `Code/preprocessing/verbalize.py`
   - `cluster_entities(...)` (pipeline đầy đủ)
   - `extract_entities(quads)`
 
-File chính: `Code/clustering/entity_cluster.py`
+File chính: `clustering/entity_cluster.py`
 
 ---
 
-## `Code/history/`
+## `history/`
 
 - `get_entity_history(entity, data)`
   - Lấy toàn bộ sự kiện liên quan entity (entity ở subject hoặc object)
@@ -54,21 +54,21 @@ File chính: `Code/clustering/entity_cluster.py`
 - `filter_by_relation(history, relation)`
   - Lọc sự kiện cùng relation
 
-File chính: `Code/history/history_retrieval.py`
+File chính: `history/history_retrieval.py`
 
 ---
 
-## `Code/short_term/`
+## `short_term/`
 
 - `get_short_term(history, l=20)`
   - Sort theo timestamp
   - Lấy `l` sự kiện gần nhất (mặc định 20)
 
-File chính: `Code/short_term/short_term.py`
+File chính: `short_term/short_term.py`
 
 ---
 
-## `Code/long_term/`
+## `long_term/`
 
 - `compute_scores_with_llm(history)`
   - Đọc prompt từ `prompts/filter_prompt.txt`
@@ -82,27 +82,27 @@ File chính: `Code/short_term/short_term.py`
   - Giữ event nếu `p(hl) >= c_j`
 
 Files:
-- `Code/long_term/long_term_filter.py`
-- `Code/long_term/dummy_scorer.py` (test local)
-- `Code/long_term/test_long_term.py`
+- `long_term/long_term_filter.py`
+- `long_term/dummy_scorer.py` (test local)
+- `long_term/test_long_term.py`
 
 ---
 
-## `Code/analogical/`
+## `analogical/`
 
 - `generate_analogical_reasoning(event, similar_events)`
   - Đọc prompt từ `prompts/reasoning_prompt.txt`
   - Gọi generator qua env `LLM_GENERATOR="module:function"`
 
 Files:
-- `Code/analogical/analogical_reasoning.py`
-- `Code/analogical/dummy_generator.py`
-- `Code/analogical/test_analogical.py`
-- `Code/analogical/run_dummy_on_real_data.py`
+- `analogical/analogical_reasoning.py`
+- `analogical/dummy_generator.py`
+- `analogical/test_analogical.py`
+- `analogical/run_dummy_on_real_data.py`
 
 ---
 
-## `Code/inference/`
+## `inference/`
 
 - `predict_next_object(query_event)`
   - Kết hợp:
@@ -113,19 +113,19 @@ Files:
   - Gọi LLM predictor để trả object dự đoán
 
 Files:
-- `Code/inference/final_prediction.py`
-- `Code/inference/dummy_predictor.py`
-- `Code/inference/test_prediction_dummy.py`
+- `inference/final_prediction.py`
+- `inference/dummy_predictor.py`
+- `inference/test_prediction_dummy.py`
 
 ---
 
-## `Code/llm/`
+## `llm/`
 
 - Unified API:
-  - `call_llm(prompt)` trong `Code/llm/unified.py`
+  - `call_llm(prompt)` trong `llm/unified.py`
   - Hỗ trợ `openai` / `groq` qua `LLM_PROVIDER`
 - Ollama local:
-  - `Code/llm/ollama_adapter.py` có:
+  - `llm/ollama_adapter.py` có:
     - `generate_fn(prompt)`
     - `score_fn(prompt, events)`
     - `predict_fn(prompt)`
@@ -138,6 +138,7 @@ Files:
 
 - `prompts/filter_prompt.txt` (long-term scoring)
 - `prompts/reasoning_prompt.txt` (analogical reasoning)
+- `prompts/prediction_prompt.txt` (final prediction)
 
 ---
 
@@ -146,24 +147,24 @@ Files:
 ### Dùng local Ollama (`llama3.2:1b`) cho toàn pipeline
 
 ```powershell
-$env:LLM_GENERATOR = "Code.llm.ollama_adapter:generate_fn"
-$env:LLM_SCORER    = "Code.llm.ollama_adapter:score_fn"
-$env:LLM_PREDICTOR = "Code.llm.ollama_adapter:predict_fn"
+$env:LLM_GENERATOR = "llm.ollama_adapter:generate_fn"
+$env:LLM_SCORER    = "llm.ollama_adapter:score_fn"
+$env:LLM_PREDICTOR = "llm.ollama_adapter:predict_fn"
 $env:OLLAMA_MODEL  = "llama3.2:1b"
-$env:TKG_DATA_DIR  = "Code/data/ICEWS05-15"
+$env:TKG_DATA_DIR  = "data/ICEWS05-15"
 ```
 
-Chạy inference:
+Chạy inference (từ project root, thư mục này chứa các folder `inference/`, `long_term/`, v.v.):
 
 ```powershell
-python -m Code.inference.final_prediction
+python -m inference.final_prediction
 ```
 
 ---
 
 ## 5) Dependencies
 
-`Code/requirements.txt` đã có:
+`requirements.txt` đã có:
 
 - `sentence-transformers`
 - `scikit-learn`
@@ -201,10 +202,12 @@ Lưu ý: nếu dùng OpenAI/Groq/unified interface thì cần thêm thư viện 
 
 ## 8) Entry points test nhanh
 
+Chạy từ project root:
+
 ```powershell
-python Code/analogical/test_analogical.py
-python Code/long_term/test_long_term.py
-python Code/inference/test_prediction_dummy.py
-python -m Code.inference.final_prediction
+python analogical/test_analogical.py
+python long_term/test_long_term.py
+python inference/test_prediction_dummy.py
+python -m inference.final_prediction
 ```
 
