@@ -328,7 +328,7 @@ def verbalize_event(
     """
     date_str = _format_date(t) if use_date_words else t.strip()
     verb_phrase = _resolve_relation(r)
-    return f"On {date_str}, {s.strip()} {verb_phrase} {o.strip()}."
+    return f"On {date_str}, {_pretty_entity(s)} {verb_phrase} {_pretty_entity(o)}."
 
 
 def build_corpus(
@@ -375,6 +375,17 @@ def _resolve_relation(relation: str) -> str:
     if not any(phrase.endswith(p) for p in _TRAILING_PREPS):
         phrase += " with"
     return phrase
+
+
+def _pretty_entity(name: str) -> str:
+    """Render an entity name nicely for natural-language output.
+
+    The ICEWS-style datasets encode multi-word entities with underscores,
+    e.g. ``South_Korea``.  For readability we replace ``_`` with spaces
+    in the verbalized sentences while keeping the original tokenization
+    for downstream modeling.
+    """
+    return name.strip().replace("_", " ")
 
 
 def _extract_quad(raw: dict) -> Quadruple:
