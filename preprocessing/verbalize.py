@@ -376,7 +376,15 @@ def _load_directory(
     dirpath: Path,
     splits: Sequence[str] | None,
 ) -> list[Quadruple]:
-    """Load all split files from a TKG dataset directory."""
+    """Load all split files from a TKG dataset directory.
+
+    Supports two common layouts:
+    - Raw textual quadruples: split files (``train``, ``valid``, ``test``)
+      already store subject / relation / object / timestamp strings.
+    - ICEWS-style ID format: split files contain integer IDs
+      (entity_id, relation_id, entity_id, time_id) with separate mapping
+      files ``entity2id.txt`` and ``relation2id.txt`` in the same directory.
+    """
     if splits is None:
         candidates = [dirpath / name for name in _SPLIT_NAMES]
         split_files = [p for p in candidates if p.is_file()]
@@ -388,9 +396,88 @@ def _load_directory(
             f"No split files ({', '.join(_SPLIT_NAMES)}) found in {dirpath}"
         )
 
+    ent_map_path = dirpath / "entity2id.txt"
+    rel_map_path = dirpath / "relation2id.txt"
+
+    # If both mapping files exist, treat this as an ICEWS-style ID dataset
+    # and decode IDs into human-readable entity / relation strings.
+    if ent_map_path.is_file() and rel_map_path.is_file():
+        return _load_icews_id_directory(dirpath, split_files, ent_map_path, rel_map_path)
+
+    # Fallback: assume split files already contain textual quadruples.
     quads: list[Quadruple] = []
     for fp in split_files:
         quads.extend(_load_tabular(fp))
+    return quads
+
+
+def _load_icews_id_directory(
+    dirpath: Path,
+    split_files: Sequence[Path],
+    ent_map_path: Path,
+    rel_map_path: Path,
+) -> list[Quadruple]:
+    """Load ICEWS-style dataset where splits store integer IDs.
+
+    Each split line has the form:
+        subject_id \\t relation_id \\t object_id \\t time_id
+
+    and the directory also contains:
+        entity2id.txt      (``name\\tidx``)
+        relation2id.txt    (``name\\tidx``)
+
+    We decode IDs into their textual names so that downstream modules
+    (history, verbalization, clustering) operate on semantic strings,
+    as assumed in the AnRe design.
+    """
+
+    def _load_id_mapping(path: Path) -> dict[int, str]:
+        mapping: dict[int, str] = {}
+        with open(path, encoding="utf-8") as f:
+            for line in f:
+                line = line.strip()
+                if not line:
+                    continue
+                parts = line.split("\t")
+                if len(parts) < 2:
+                    continue
+                name, idx_str = parts[0], parts[1]
+                try:
+                    idx = int(idx_str)
+                except ValueError:
+                    continue
+                mapping[idx] = name
+        return mapping
+
+    ent_map = _load_id_mapping(ent_map_path)
+    rel_map = _load_id_mapping(rel_map_path)
+
+    quads: list[Quadruple] = []
+    for fp in split_files:
+        with open(fp, encoding="utf-8") as f:
+            for line in f:
+                line = line.strip()
+                if not line:
+                    continue
+                parts = line.split("\t")
+                if len(parts) < 4:
+                    continue
+                s_id_str, r_id_str, o_id_str, t_id_str = parts[:4]
+                try:
+                    s_id = int(s_id_str)
+                    r_id = int(r_id_str)
+                    o_id = int(o_id_str)
+                except ValueError:
+                    # If any field is non-integer, fall back to raw strings.
+                    s, r, o, t = s_id_str, r_id_str, o_id_str, t_id_str
+                else:
+                    s = ent_map.get(s_id, s_id_str)
+                    r = rel_map.get(r_id, r_id_str)
+                    o = ent_map.get(o_id, o_id_str)
+                    t = t_id_str  # keep numeric time ID as-is
+
+                quads.append(Quadruple(s, r, o, t))
+
     return quads
 
 
