@@ -44,12 +44,27 @@ For Hugging Face local (Colab GPU — download weights, matches paper model fami
 
 from __future__ import annotations
 
-import copy
 import json
 import os
 import urllib.error
 import urllib.request
 from typing import Any
+
+
+def _hf_drop_fixed_max_length(model: Any) -> None:
+    """HF checkpoints often set generation_config.max_length (e.g. 4096). Passing
+    max_new_tokens in generate() then triggers: "Both max_new_tokens and max_length".
+    Unset max_length once after load so only max_new_tokens controls decode length."""
+    gc = getattr(model, "generation_config", None)
+    if gc is None:
+        return
+    try:
+        setattr(gc, "max_length", None)
+    except (TypeError, AttributeError):
+        try:
+            object.__setattr__(gc, "max_length", None)
+        except Exception:
+            pass
 
 # ---------------------------------------------------------------------------
 # Hugging Face local cache (lazy-loaded)
@@ -243,6 +258,7 @@ def _load_huggingface_model(model_id: str) -> None:
             model_kwargs.pop("quantization_config", None)
 
     model = AutoModelForCausalLM.from_pretrained(model_id, **model_kwargs)
+    _hf_drop_fixed_max_length(model)
     _hf_model = model
     _hf_tokenizer = tokenizer
 
@@ -327,31 +343,22 @@ def _call_huggingface(prompt: str) -> str:
     else:
         gen_in = dict(input_ids=input_ids)
 
-    # Avoid noisy HF warnings: model.generation_config often sets max_length=4096
-    # and sampling params while we use greedy decoding — clone and override.
-    try:
-        from transformers import GenerationConfig
+    # max_new_tokens is required (open-ended decode). max_length on the model was
+    # cleared in _hf_drop_fixed_max_length to avoid HF warnings.
+    gen_kwargs: dict[str, Any] = dict(
+        max_new_tokens=max_new,
+        do_sample=do_sample,
+        pad_token_id=tokenizer.pad_token_id,
+    )
+    if do_sample:
+        gen_kwargs["temperature"] = float(os.environ.get("HF_TEMPERATURE", "0.2"))
+    else:
+        # Greedy: neutral sampling kwargs silence "temperature/top_p not valid" on some HF versions.
+        gen_kwargs["temperature"] = 1.0
+        gen_kwargs["top_p"] = 1.0
 
-        gen_cfg = copy.deepcopy(model.generation_config)
-        gen_cfg.max_length = None
-        gen_cfg.max_new_tokens = max_new
-        gen_cfg.do_sample = do_sample
-        gen_cfg.pad_token_id = tokenizer.pad_token_id
-        if do_sample:
-            gen_cfg.temperature = float(os.environ.get("HF_TEMPERATURE", "0.2"))
-        with torch.no_grad():
-            out = model.generate(**gen_in, generation_config=gen_cfg)
-    except Exception:
-        gen_kwargs: dict[str, Any] = dict(
-            max_new_tokens=max_new,
-            max_length=None,
-            do_sample=do_sample,
-            pad_token_id=tokenizer.pad_token_id,
-        )
-        if do_sample:
-            gen_kwargs["temperature"] = float(os.environ.get("HF_TEMPERATURE", "0.2"))
-        with torch.no_grad():
-            out = model.generate(**gen_in, **gen_kwargs)
+    with torch.no_grad():
+        out = model.generate(**gen_in, **gen_kwargs)
 
     new_tokens = out[0, input_ids.shape[1] :]
     return tokenizer.decode(new_tokens, skip_special_tokens=True)
