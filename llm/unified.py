@@ -192,7 +192,23 @@ def _load_huggingface_model(model_id: str) -> None:
     global _hf_model, _hf_tokenizer
 
     import torch
-    from transformers import AutoModelForCausalLM, AutoTokenizer
+    try:
+        from transformers import AutoModelForCausalLM, AutoTokenizer
+    except Exception as exc:
+        msg = str(exc)
+        if "PyTorch and torchvision were compiled with different CUDA major versions" in msg:
+            raise RuntimeError(
+                "Detected mismatched torch/torchvision CUDA builds in Colab. "
+                "Reinstall matching wheels (e.g. torch==2.5.1, torchvision==0.20.1 "
+                "from cu124 index), then restart runtime."
+            ) from exc
+        if "Gemma3nConfig" in msg:
+            raise RuntimeError(
+                "Transformers installation is inconsistent (missing Gemma3nConfig). "
+                "Reinstall transformers + huggingface_hub with compatible versions, "
+                "then restart runtime."
+            ) from exc
+        raise
 
     token = os.environ.get("HF_TOKEN", "").strip() or None
     trust_remote = _env_truthy("HF_TRUST_REMOTE_CODE", False)

@@ -1,33 +1,29 @@
-# Colab Setup (HF Llama/Qwen) - stable for AnRe
+# Colab Setup (HF Llama/Qwen) - stable for AnRe (A100)
 
-## Problem
-`StrictDataclassDefinitionError: Class 'BloomConfig' must be a dataclass before applying @strict.`
+## Common Colab errors
+- `PyTorch and torchvision were compiled with different CUDA major versions`
+- `Could not import module 'Gemma3nConfig'`
+- `StrictDataclassDefinitionError ... BloomConfig ... @strict`
 
-This error typically happens when `huggingface_hub` and `transformers` versions are not compatible
-on Colab. In your run, `call_llm` + analogical generation + long-term scoring succeed,
-but `predict_next_object()` crashes right after, due to this dependency mismatch.
+These are environment/package mismatch issues (not AnRe logic bugs).
 
-## Fix: pin HF deps (recommended)
-Run the following shell block **in your Colab notebook** (once per runtime, before running the pipeline).
+## Fix: clean reinstall ML stack (recommended for A100)
+Run this shell block **in your Colab notebook** (once per runtime, before running the pipeline):
 
 ```bash
-!pip -q install -U \
-  "torch" \
-  "transformers" \
-  "accelerate" \
-  "bitsandbytes" \
-  "sentence-transformers" \
-  "scikit-learn" \
-  "numpy" \
-  "huggingface_hub<0.32"
+!pip -q uninstall -y torch torchvision torchaudio transformers huggingface_hub tokenizers
+!pip -q install --no-cache-dir --index-url https://download.pytorch.org/whl/cu124 \
+  torch==2.5.1 torchvision==0.20.1 torchaudio==2.5.1
+!pip -q install --no-cache-dir -U \
+  transformers accelerate bitsandbytes huggingface_hub tokenizers \
+  sentence-transformers scikit-learn numpy
 ```
 
 Notes:
-- We intentionally pin `huggingface_hub<0.32` to avoid the strict dataclass validation that
-  triggers the `BloomConfig` crash.
-- After this install, **Restart runtime** (recommended), then rerun your cells.
+- After this install, **Runtime -> Restart session**.
+- Do not keep stale imports from old runtime. Re-run all setup cells after restart.
 
-## Env variables for this repo
+## Env variables for this repo (A100)
 Example for **Llama 3**:
 
 ```python
@@ -39,6 +35,17 @@ os.environ["HF_MAX_NEW_TOKENS"] = "200"
 os.environ["HF_DO_SAMPLE"] = "0"
 # For gated models (Llama): set HF_TOKEN
 # os.environ["HF_TOKEN"] = "hf_xxx"
+os.environ["TKG_DATA_DIR"] = "data/ICEWS05-15"
+```
+
+Example for **Qwen2.5-7B**:
+```python
+import os
+os.environ["LLM_PROVIDER"] = "hf"
+os.environ["HF_MODEL_ID"] = "Qwen/Qwen2.5-7B-Instruct"
+os.environ["HF_LOAD_IN_4BIT"] = "0"
+os.environ["HF_MAX_NEW_TOKENS"] = "200"
+os.environ["HF_DO_SAMPLE"] = "0"
 os.environ["TKG_DATA_DIR"] = "data/ICEWS05-15"
 ```
 
