@@ -14,14 +14,18 @@ from __future__ import annotations
 
 import logging
 from dataclasses import dataclass
+from datetime import datetime
 from typing import Any, Sequence
 
 import numpy as np
 from sentence_transformers import SentenceTransformer
 
-from common import event_fields
+from common import event_fields, parse_timestamp
 
 logger = logging.getLogger(__name__)
+
+_parse_timestamp = parse_timestamp
+_datetime_min = datetime.min
 
 MIN_HISTORY_CONTEXTS = 300
 
@@ -47,27 +51,22 @@ def get_similar_events_for_entity(
     
     Returns events in chronological order.
     """
-    from common import parse_timestamp
-    
     rel_norm = relation.strip().lower()
+    entity_norm = entity.strip()
     matching_events = []
     
     for ev in all_events:
         s, r, o, t = event_fields(ev)
-        if s.strip() == entity.strip() and r.strip().lower() == rel_norm:
+        if s.strip() == entity_norm and r.strip().lower() == rel_norm:
             if query_time is not None:
-                from common import parse_timestamp
-                ev_dt = parse_timestamp(t)
-                q_dt = parse_timestamp(query_time)
+                ev_dt = _parse_timestamp(t)
+                q_dt = _parse_timestamp(query_time)
                 if ev_dt is not None and q_dt is not None and ev_dt >= q_dt:
                     continue
             matching_events.append(ev)
     
-    from common import parse_timestamp
-    from datetime import datetime
-    
     matching_events.sort(
-        key=lambda ev: parse_timestamp(event_fields(ev)[3]) or datetime.min
+        key=lambda ev: _parse_timestamp(event_fields(ev)[3]) or _datetime_min
     )
     return matching_events
 
@@ -81,19 +80,18 @@ def get_entity_history_count(
     
     Paper §3.1 requires at least 300 relevant historical contexts.
     """
-    from common import parse_timestamp
-    
-    before_dt = parse_timestamp(before_time)
+    before_dt = _parse_timestamp(before_time)
     if before_dt is None:
         return 0
     
+    entity_norm = entity.strip()
     count = 0
     for ev in all_events:
         s, r, o, t = event_fields(ev)
-        ev_dt = parse_timestamp(t)
+        ev_dt = _parse_timestamp(t)
         if ev_dt is None or ev_dt >= before_dt:
             continue
-        if s.strip() == entity.strip() or o.strip() == entity.strip():
+        if s.strip() == entity_norm or o.strip() == entity_norm:
             count += 1
     
     return count
@@ -235,13 +233,11 @@ def find_similar_events_from_cluster(
         for ev, sim_score in ranked:
             history = get_entity_history(si, all_data)
             ev_t = event_fields(ev)[3]
-            from common import parse_timestamp
-            from datetime import datetime
-            ev_dt = parse_timestamp(ev_t)
+            ev_dt = _parse_timestamp(ev_t)
             if ev_dt is not None:
                 history = [
                     h for h in history
-                    if (parse_timestamp(event_fields(h)[3]) or datetime.min) < ev_dt
+                    if (_parse_timestamp(event_fields(h)[3]) or _datetime_min) < ev_dt
                 ]
             
             # Paper §3.3: "we filter out ei from Hi if its length is less 
