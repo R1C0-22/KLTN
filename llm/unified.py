@@ -248,6 +248,7 @@ def _call_huggingface(prompt: str) -> str:
     tokenizer = _hf_tokenizer
     messages = [{"role": "user", "content": prompt}]
 
+    attention_mask: Any | None = None
     if getattr(tokenizer, "chat_template", None):
         # Some transformer/tokenizer versions return non-tensor objects from
         # `apply_chat_template(..., return_tensors="pt")`. To stay robust,
@@ -258,9 +259,12 @@ def _call_huggingface(prompt: str) -> str:
             add_generation_prompt=True,
             tokenize=False,
         )
-        input_ids = tokenizer(prompt_text, return_tensors="pt").input_ids
+        enc = tokenizer(prompt_text, return_tensors="pt", padding=False)
     else:
-        input_ids = tokenizer(prompt, return_tensors="pt").input_ids
+        enc = tokenizer(prompt, return_tensors="pt", padding=False)
+
+    input_ids = enc["input_ids"]
+    attention_mask = enc.get("attention_mask")
 
     # Defensive fallback: enforce a torch tensor of token ids.
     if not torch.is_tensor(input_ids):
@@ -271,6 +275,8 @@ def _call_huggingface(prompt: str) -> str:
             input_ids = torch.tensor(input_ids, dtype=torch.long)
     device = next(model.parameters()).device
     input_ids = input_ids.to(device)
+    if attention_mask is not None:
+        attention_mask = attention_mask.to(device)
 
     max_new = int(os.environ.get("HF_MAX_NEW_TOKENS", "512"))
     do_sample = _env_truthy("HF_DO_SAMPLE", False)
@@ -281,6 +287,8 @@ def _call_huggingface(prompt: str) -> str:
     )
     if do_sample:
         gen_kwargs["temperature"] = float(os.environ.get("HF_TEMPERATURE", "0.2"))
+    if attention_mask is not None:
+        gen_kwargs["attention_mask"] = attention_mask
 
     with torch.no_grad():
         out = model.generate(input_ids, **gen_kwargs)

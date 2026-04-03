@@ -32,7 +32,6 @@ On Colab you typically just export those env vars at the notebook level.
 from __future__ import annotations
 
 import json
-import re
 from typing import Any, Sequence, List
 
 from .unified import call_llm
@@ -53,14 +52,34 @@ def _extract_first_json_array(text: str) -> List[float]:
     Used by `score_fn`. The `filter_prompt.txt` template already instructs
     the model to output ONLY a JSON array, but we stay defensive here.
     """
-    match = re.search(r"\[[\s\S]*?\]", text)
-    if not match:
-        raise ValueError(f"Could not find JSON array in model output: {text[:200]}")
-    arr_text = match.group(0)
-    parsed = json.loads(arr_text)
-    if not isinstance(parsed, list):
-        raise ValueError("Extracted JSON is not a list.")
-    return [float(x) for x in parsed]
+    text = text.strip()
+    # Strip optional markdown fence so JSON is parseable.
+    if text.startswith("```"):
+        lines = text.splitlines()
+        if lines and lines[0].startswith("```"):
+            lines = lines[1:]
+        if lines and lines[-1].strip().startswith("```"):
+            lines = lines[:-1]
+        text = "\n".join(lines).strip()
+
+    # Prefer balanced-bracket extraction: non-greedy `\\[[\\s\\S]*?\\]`
+    # can stop at the first `]` inside nested structures or mis-parse arrays.
+    start = text.find("[")
+    if start == -1:
+        raise ValueError(f"Could not find '[' in model output: {text[:200]!r}")
+    depth = 0
+    for i in range(start, len(text)):
+        if text[i] == "[":
+            depth += 1
+        elif text[i] == "]":
+            depth -= 1
+            if depth == 0:
+                arr_text = text[start : i + 1]
+                parsed = json.loads(arr_text)
+                if not isinstance(parsed, list):
+                    raise ValueError("Extracted JSON is not a list.")
+                return [float(x) for x in parsed]
+    raise ValueError(f"Unclosed JSON array in model output: {text[:200]!r}")
 
 
 def score_fn(prompt: str, events: Sequence[Any]) -> List[float]:
