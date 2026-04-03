@@ -7,22 +7,40 @@
 
 These are environment/package mismatch issues (not AnRe logic bugs).
 
-## Fix: reinstall ML stack (recommended for A100)
-Run this shell block **in your Colab notebook** (once per runtime, before running the pipeline):
+## Fix: install / upgrade (without breaking Colab)
+
+**Do not** run `pip uninstall -y torch transformers huggingface_hub ...` on Colab first. That removes packages that **other preinstalled libraries** (`torchtune`, `peft`, `timm`) depend on and triggers long red “dependency conflicts” traces even when your project still works.
+
+### Recommended (additive — KISS)
+Run **once per runtime**, then **Restart session** if pip upgraded something major:
 
 ```bash
-!pip -q uninstall -y torch torchvision torchaudio transformers huggingface_hub tokenizers
+!pip -q install -U \
+  "transformers>=4.41.0,<7.0.0" \
+  accelerate \
+  bitsandbytes \
+  huggingface_hub \
+  tokenizers \
+  sentence-transformers \
+  scikit-learn \
+  numpy
+```
+
+### Only if you truly have a CUDA / torch mismatch
+Try this **instead** of uninstall-everything (still order matters — torch first, then HF stack):
+
+```bash
 !pip -q install --no-cache-dir --index-url https://download.pytorch.org/whl/cu124 \
   torch==2.5.1 torchvision==0.20.1 torchaudio==2.5.1
-!pip -q install --no-cache-dir -U \
-  transformers accelerate bitsandbytes huggingface_hub tokenizers \
+!pip -q install -U \
+  "transformers>=4.41.0,<7.0.0" \
+  accelerate bitsandbytes huggingface_hub tokenizers \
   sentence-transformers scikit-learn numpy
 ```
 
 Notes:
-- Keep **`huggingface_hub`** and **`tokenizers`** in the **second** `pip install` line (do not stop after installing only `torch`, or you will see dependency conflicts).
-- After this install, **Runtime -> Restart session**.
-- Do not keep stale imports from old runtime. Re-run all setup cells after restart.
+- After install, **Runtime → Restart session** if you still see import errors.
+- Re-run setup cells after restart (no stale imports).
 
 ### Long prompts / PDC scoring (HF 8k models)
 If `predict_next_object` fails in `cloud_adapter.py` with **“Could not find '[' in model output”**, the long-term scorer prompt was too long for the context window. Fix:
@@ -83,10 +101,16 @@ print(compute_scores_with_llm(hist, q))
 ```
 4) End-to-end one-query prediction:
 ```python
+import os
+from preprocessing import load_dataset
 from inference.final_prediction import predict_next_object
+
+os.environ["TKG_DATA_DIR"] = "data/ICEWS05-15"  # required when query is a plain tuple
 v = load_dataset("data/ICEWS05-15", splits=["valid"])
 e = v[0]
 q = (e.subject, e.relation, "?", e.timestamp)
 print(predict_next_object(q))
 ```
+
+If `data/ICEWS05-15` exists under the repo root, you may omit `TKG_DATA_DIR` — the inference module will default to that path.
 

@@ -74,6 +74,12 @@ def _env_truthy(name: str, default: bool = False) -> bool:
     return v in ("1", "true", "yes", "on")
 
 
+def _default_train_data_dir() -> str | None:
+    """If `data/ICEWS05-15` exists under the repo root, use it as a smoke-test default."""
+    candidate = Path(__file__).resolve().parents[1] / "data" / "ICEWS05-15"
+    return str(candidate) if candidate.is_dir() else None
+
+
 def _load_history_data(query_event: Any) -> list[Any]:
     """Load TKG training data for history retrieval."""
     if hasattr(query_event, "data"):
@@ -83,8 +89,11 @@ def _load_history_data(query_event: Any) -> list[Any]:
 
     data_dir = os.environ.get("TKG_DATA_DIR", "").strip()
     if not data_dir:
+        data_dir = (_default_train_data_dir() or "").strip()
+    if not data_dir:
         raise EnvironmentError(
-            "No data provided. Pass query_event.data or set TKG_DATA_DIR."
+            "No data provided. Pass query_event.data, set TKG_DATA_DIR, or place "
+            "dataset at data/ICEWS05-15 under the project root."
         )
 
     from preprocessing import load_dataset
