@@ -1,34 +1,24 @@
 """
 Long-term history filtering for Temporal Knowledge Graph Forecasting.
 
-This module implements the paper's dynamic threshold filtering step for the
-Probability Distribution Calculation (PDC) / Dynamic Threshold Filtering
-described in §3.2.2.
+This module implements the paper's Dual History Extraction (§3.2):
+  - Short-term history retriever: get last l events
+  - Long-term history retriever: PDC + DTF filtering
+
+Key Algorithm (§3.2.2):
+  1. HL = Hi - HS (subtract short-term from full history first!)
+  2. Partition HL by timestamp into time-step groups H^{tj}
+  3. For each time-step, use PDC to score events with LLM
+  4. Apply DTF to filter events with p(hl) >= threshold c_j
+  5. Retrieve backwards from tli-1 until sufficient length L
 
 Required functions:
-  - compute_scores_with_llm(history)
+  - compute_scores_with_llm(history, query_event)
   - dynamic_threshold(F, delta_t, T, alpha)
   - filter_long_term(history, scores)
+  - extract_dual_history(full_history, query_event, l, L)
 
-Notes on `compute_scores_with_llm`
-----------------------------------
-The original paper computes a probability p(hl) for each historical event hl
-using LLM token/logit scores and softmax normalization.
-
-This repository does not ship an LLM client wrapper, so this function expects
-an external "LLM scorer" callable to be provided via an environment variable:
-
-    LLM_SCORER="some_python_module:some_function"
-
-The callable must have this signature:
-    score_fn(prompt: str, events: list[Any]) -> list[float]
-
-where the returned list is a set of per-event *logits* (or any real-valued
-scores that can be softmax-normalized).
-
-`compute_scores_with_llm` loads the prompt template from:
-    prompts/filter_prompt.txt
-relative to the repository root.
+Reference: Tang et al., ACL 2025, Algorithm 1 lines 7-9, 13-15
 """
 
 from __future__ import annotations
@@ -292,4 +282,112 @@ def filter_long_term(
         key=lambda x: x[2],
     )
     return [ev for i, ev, _ in chronological if i in keep_by_idx]
+
+
+def subtract_short_term(
+    full_history: Sequence[Any],
+    short_term: Sequence[Any],
+) -> list[Any]:
+    """Subtract short-term history from full history.
+    
+    Paper §3.2.2: "the long-term history chain is obtained from
+    the set HL = Hi - HS"
+    
+    Returns events in full_history that are NOT in short_term.
+    """
+    short_set = set()
+    for ev in short_term:
+        s, r, o, t = event_fields(ev)
+        short_set.add((s.strip(), r.strip().lower(), o.strip(), t.strip()))
+    
+    result = []
+    for ev in full_history:
+        s, r, o, t = event_fields(ev)
+        key = (s.strip(), r.strip().lower(), o.strip(), t.strip())
+        if key not in short_set:
+            result.append(ev)
+    
+    return result
+
+
+def extract_dual_history(
+    full_history: Sequence[Any],
+    query_event: Any,
+    l: int = 20,
+    L: int = 100,
+    alpha: float = 2.75,
+) -> tuple[list[Any], list[Any]]:
+    """Extract both short-term and long-term history following paper Algorithm 1.
+    
+    Paper §3.2 Dual History Extraction:
+    1. HS = get_short_term(Hi, l) - last l events
+    2. HL = Hi - HS - subtract short-term first!
+    3. Partition HL by timestamp, apply PDC + DTF
+    4. Retrieve backwards until sufficient length L
+    5. Return (HS, HL) for concatenation
+    
+    Parameters
+    ----------
+    full_history : Sequence[Any]
+        Complete history Hi of the entity (NOT filtered by relation!)
+    query_event : Any
+        Masked query event (s, r, ?, t)
+    l : int
+        Short-term history length (default 20)
+    L : int
+        Total history length target (default 100)
+    alpha : float
+        DTF variation factor (default 2.75)
+    
+    Returns
+    -------
+    (short_term, long_term) : tuple[list[Any], list[Any]]
+        Short-term and long-term histories, both in chronological order
+    """
+    from short_term import get_short_term
+    
+    short_term = get_short_term(full_history, l=l)
+    
+    long_term_pool = subtract_short_term(full_history, short_term)
+    
+    if not long_term_pool:
+        return short_term, []
+    
+    scores = compute_scores_with_llm(long_term_pool, query_event)
+    
+    _, _, _, query_time = event_fields(query_event)
+    long_term_filtered = filter_long_term(
+        long_term_pool, 
+        scores, 
+        query_time=query_time,
+    )
+    
+    target_long_term_len = max(0, L - len(short_term))
+    
+    if len(long_term_filtered) > target_long_term_len:
+        long_term_filtered = long_term_filtered[-target_long_term_len:]
+    
+    return short_term, long_term_filtered
+
+
+def combine_dual_history(
+    short_term: Sequence[Any],
+    long_term: Sequence[Any],
+) -> list[Any]:
+    """Combine short-term and long-term into final history chain.
+    
+    Paper §3.2.2: "Finally, we concatenate HS and HL to obtain
+    the combined long-term and short-term history chain Hi."
+    
+    Returns events in chronological order.
+    """
+    from datetime import datetime
+    
+    all_events = list(long_term) + list(short_term)
+    
+    all_events.sort(
+        key=lambda ev: parse_timestamp(event_fields(ev)[3]) or datetime.min
+    )
+    
+    return all_events
 

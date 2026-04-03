@@ -2,8 +2,16 @@
 Temporal Knowledge Graph history retrieval utilities.
 
 Implements:
-  - get_entity_history(entity, data): retrieve all events involving an entity
+  - get_entity_history(entity, data): retrieve ALL events involving an entity
   - filter_by_relation(history, relation): keep only events with a specific relation
+
+IMPORTANT (Paper §3.2):
+  The AnRe framework uses FULL entity history Hi (not relation-filtered!)
+  for both short-term and long-term extraction. The dual history is:
+    - Hi = {(s, r, o, t) ∈ TKG_{t<n+1} | s = si or o = si}
+  
+  Relation filtering should ONLY be used for finding similar events Ei,
+  NOT for building the history context that goes into the prompt.
 
 Both functions are designed to work with either:
   - Quadruple objects returned by `preprocessing.load_dataset`, or

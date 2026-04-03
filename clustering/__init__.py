@@ -7,6 +7,14 @@ from .entity_cluster import (
     ClusterResult,
 )
 
+from .candidate_filter import (
+    find_similar_events_from_cluster,
+    build_candidate_set,
+    build_candidate_set_second_order,
+    SimilarEventCandidate,
+    MIN_HISTORY_CONTEXTS,
+)
+
 __all__ = [
     "embed_entities",
     "find_optimal_k",
@@ -14,4 +22,9 @@ __all__ = [
     "cluster_entities",
     "extract_entities",
     "ClusterResult",
+    "find_similar_events_from_cluster",
+    "build_candidate_set",
+    "build_candidate_set_second_order",
+    "SimilarEventCandidate",
+    "MIN_HISTORY_CONTEXTS",
 ]

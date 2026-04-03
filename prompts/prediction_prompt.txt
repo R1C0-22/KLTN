@@ -1,18 +1,21 @@
-Given:
-Short-term history:
-{short_term}
+You will be provided with some historical events in chronological order, a question, and several candidate answers. Based on the development of these historical events, please deduce the most likely correct answer entity for the question and output its corresponding number. Below are reasoning examples.
 
-Long-term history:
-{long_term}
+{analogical_examples}
 
-Analogical reasoning:
-{reasoning}
+Please learn from these examples and then provide the most likely correct answer number for the question.
 
-Predict the missing entity in:
+Historical Events:
+{history}
+
+Question:
 {query}
 
-Candidate objects (JSON array):
+Candidate Answers:
 {candidates}
 
-Return only the predicted entity name from the candidate list (or the best match if none).
+Your choice is:
 
+IMPORTANT (for this codebase):
+- Output ONLY the candidate entity name (exactly as shown in the list above).
+- Do NOT output the number, only the entity name.
+- If unsure, pick the most likely candidate based on the historical patterns.

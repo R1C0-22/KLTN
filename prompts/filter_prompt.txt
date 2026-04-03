@@ -1,5 +1,4 @@
-There is a question and some historical events. Please select the historical event that is most helpful in
-answering this question from these historical events.
+There is a question and some historical events. Please select the historical event that is most helpful in answering this question from these historical events and return the number before the event.
 
 Question:
 {query}
@@ -15,4 +14,3 @@ IMPORTANT (for this codebase):
 - Larger float means the historical event is more helpful for answering the question.
 - Do NOT output all zeros; even if uncertain, add small differences between values.
 - Output ONLY the JSON array. No extra text.
-
