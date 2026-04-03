@@ -29,7 +29,7 @@ For Groq:
 On Colab you typically just export those env vars at the notebook level.
 
 Long-term PDC scoring (`score_fn`) extras (Hugging Face):
-    HF_SCORE_MAX_NEW_TOKENS=128     # optional; keeps JSON-score generations short
+    HF_SCORE_MAX_NEW_TOKENS=...     # optional floor; auto minimum scales with chunk size so JSON is not truncated
     LLM_SCORE_PARSE_FALLBACK=1      # optional; if model output is not a JSON array, use deterministic pseudo-scores
 """
 
@@ -38,9 +38,25 @@ from __future__ import annotations
 import hashlib
 import json
 import os
+import re
 from typing import Any, Sequence, List
 
 from .unified import call_llm, call_llm_logprobs
+
+
+def _min_score_max_new_tokens(n_events: int) -> int:
+    """Lower bound on new tokens so a JSON array of n floats can finish (closing `]`)."""
+    n = max(1, int(n_events))
+    # JSON floats are verbose ("-0.123, "); ~14 chars each is a safe budget; cap for huge chunks.
+    return max(256, min(4096, 14 * n + 64))
+
+
+def _effective_score_max_new_tokens(n_events: int) -> int:
+    """Merge explicit HF_SCORE_MAX_NEW_TOKENS with a minimum derived from chunk size."""
+    raw = os.environ.get("HF_SCORE_MAX_NEW_TOKENS", "").strip()
+    user = int(raw) if raw.isdigit() else 0
+    need = _min_score_max_new_tokens(n_events)
+    return max(need, user) if user else need
 
 
 def generate_fn(prompt: str) -> str:
@@ -85,6 +101,11 @@ def _extract_first_json_array(text: str) -> List[float]:
                 if not isinstance(parsed, list):
                     raise ValueError("Extracted JSON is not a list.")
                 return [float(x) for x in parsed]
+    # Truncated generation (max_new_tokens too low): try to salvage floats after "[".
+    tail = text[start + 1 :]
+    nums = re.findall(r"-?\d+(?:\.\d+)?(?:[eE][+-]?\d+)?", tail)
+    if nums:
+        return [float(x) for x in nums]
     raise ValueError(f"Unclosed JSON array in model output: {text[:200]!r}")
 
 
@@ -106,18 +127,17 @@ def score_fn(prompt: str, events: Sequence[Any]) -> List[float]:
     The prompt (from `prompts/filter_prompt.txt`) must instruct the model
     to output ONLY a JSON array of real-valued logits, one per event.
     """
-    score_tok = os.environ.get("HF_SCORE_MAX_NEW_TOKENS", "").strip()
+    n_ev = len(events)
+    score_limit = str(_effective_score_max_new_tokens(n_ev))
     saved_tok = os.environ.get("HF_MAX_NEW_TOKENS")
-    if score_tok:
-        os.environ["HF_MAX_NEW_TOKENS"] = score_tok
+    os.environ["HF_MAX_NEW_TOKENS"] = score_limit
     try:
         raw = call_llm(prompt)
     finally:
-        if score_tok:
-            if saved_tok is None:
-                os.environ.pop("HF_MAX_NEW_TOKENS", None)
-            else:
-                os.environ["HF_MAX_NEW_TOKENS"] = saved_tok
+        if saved_tok is None:
+            os.environ.pop("HF_MAX_NEW_TOKENS", None)
+        else:
+            os.environ["HF_MAX_NEW_TOKENS"] = saved_tok
 
     if not isinstance(raw, str):
         raw = str(raw)

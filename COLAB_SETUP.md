@@ -27,7 +27,7 @@ Notes:
 ### Long prompts / PDC scoring (HF 8k models)
 If `predict_next_object` fails in `cloud_adapter.py` with **“Could not find '[' in model output”**, the long-term scorer prompt was too long for the context window. Fix:
 - Chunk scoring (default **32** events per LLM call): set `LLM_SCORE_CHUNK_SIZE=32` (or `24` on tighter GPUs).
-- Optional: `HF_MAX_INPUT_TOKENS=6000`, `HF_SCORE_MAX_NEW_TOKENS=128`.
+- Optional: `HF_MAX_INPUT_TOKENS=6000`. Do **not** set `HF_SCORE_MAX_NEW_TOKENS` too low (e.g. 128 truncates the JSON score array). If unset, the repo picks a safe minimum from chunk size; you may set a **floor** only (e.g. `512`).
 - Last resort for debugging: `LLM_SCORE_PARSE_FALLBACK=1` (deterministic pseudo-scores if JSON parse fails).
 
 ## Env variables for this repo (A100)
@@ -39,9 +39,10 @@ os.environ["LLM_PROVIDER"] = "hf"
 os.environ["HF_MODEL_ID"] = "meta-llama/Meta-Llama-3-8B-Instruct"
 os.environ["HF_LOAD_IN_4BIT"] = "0"        # A100: safe; set "1" if you want 4-bit
 os.environ["HF_MAX_NEW_TOKENS"] = "200"
-os.environ["HF_SCORE_MAX_NEW_TOKENS"] = "128"
 os.environ["LLM_SCORE_CHUNK_SIZE"] = "32"
 os.environ["HF_DO_SAMPLE"] = "0"
+# Optional PDC JSON floor (auto minimum is derived from chunk size if unset):
+# os.environ["HF_SCORE_MAX_NEW_TOKENS"] = "512"
 # For gated models (Llama): set HF_TOKEN
 # os.environ["HF_TOKEN"] = "hf_xxx"
 os.environ["TKG_DATA_DIR"] = "data/ICEWS05-15"
@@ -54,7 +55,6 @@ os.environ["LLM_PROVIDER"] = "hf"
 os.environ["HF_MODEL_ID"] = "Qwen/Qwen2.5-7B-Instruct"
 os.environ["HF_LOAD_IN_4BIT"] = "0"
 os.environ["HF_MAX_NEW_TOKENS"] = "200"
-os.environ["HF_SCORE_MAX_NEW_TOKENS"] = "128"
 os.environ["LLM_SCORE_CHUNK_SIZE"] = "32"
 os.environ["HF_DO_SAMPLE"] = "0"
 os.environ["TKG_DATA_DIR"] = "data/ICEWS05-15"
