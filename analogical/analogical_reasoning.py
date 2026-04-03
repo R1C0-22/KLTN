@@ -161,6 +161,31 @@ def generate_analysis_process(
     return analysis.strip()
 
 
+def generate_analogical_reasoning(event: Any, similar_events: Sequence[Any]) -> str:
+    """Backward-compatible hook for notebooks and smoke tests.
+
+    Older Colab snippets use ``from analogical import generate_analogical_reasoning``.
+    The paper-aligned API is :func:`generate_analysis_process` /
+    :func:`construct_analogical_example`; this wrapper keeps those snippets working.
+
+    Uses the **last** event in *similar_events* as the grounded similar quadruple
+    (answer = its object) and all **preceding** events as *history*. The *event*
+    argument is accepted for API compatibility (e.g. masked target query) but is
+    not required for the LLM call when *similar_events* is non-empty.
+    """
+    _ = event  # masked query kept for notebook API compatibility
+    if not similar_events:
+        raise ValueError("similar_events must contain at least one event.")
+    history = list(similar_events[:-1])
+    similar_event = similar_events[-1]
+    _s, _r, ans, _t = event_fields(similar_event)
+    return generate_analysis_process(
+        history=history,
+        similar_event=similar_event,
+        ground_truth_answer=str(ans).strip(),
+    )
+
+
 def construct_analogical_example(
     history: Sequence[Any],
     similar_event: Any,

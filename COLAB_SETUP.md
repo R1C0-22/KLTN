@@ -7,6 +7,11 @@
 
 These are environment/package mismatch issues (not AnRe logic bugs).
 
+- **`cannot import name 'generate_analogical_reasoning' from 'analogical'`**  
+  Fixed in repo: `analogical` re-exports a small wrapper. `git pull` and restart runtime, or use `generate_analysis_process` / `construct_analogical_example` (paper path).
+
+- **`os.environ["LLM PROVIDER"]` (space)** — wrong. Must be **`LLM_PROVIDER`** (underscore, no spaces) or `call_llm` never sees the HF backend.
+
 ## Fix: install / upgrade (without breaking Colab)
 
 **Do not** run `pip uninstall -y torch transformers huggingface_hub tokenizers ...` on Colab first.  
@@ -28,14 +33,15 @@ Run **once per runtime**, then **Restart session** if pip upgraded something maj
 ```
 
 ### Full “whole cell” shell (copy-paste) — A100 / typical Colab GPU
-Use this **as the only pip cell** when you start a fresh runtime (KISS):
+Use this **as the only pip cell** when you start a fresh runtime (KISS).  
+Do **not** add `pip uninstall` before it.
 
 ```bash
 %%bash
 set -e
 python -c "import torch; print('torch', torch.__version__, 'cuda', torch.cuda.is_available())" || true
 
-pip -q install -U \
+pip install -U --no-cache-dir \
   "transformers>=4.41.0,<7.0.0" \
   accelerate \
   bitsandbytes \
@@ -45,20 +51,28 @@ pip -q install -U \
   scikit-learn \
   numpy
 
-python -c "import transformers, huggingface_hub, tokenizers; print('HF stack OK', transformers.__version__)"
+python -c "import transformers, huggingface_hub, tokenizers, bitsandbytes; print('HF stack OK', transformers.__version__)"
+python -c "import sentence_transformers; print('sentence-transformers OK')"
 ```
+
+If pip prints red “requires X which is not installed” lines mid-install, wait until the cell finishes; then run the two `python -c` checks. If either fails: **Runtime → Restart session** and run this cell again (still no uninstall).
 
 ### Only if you truly have a CUDA / torch mismatch
 Try this **instead** of uninstall-everything (still order matters — torch first, then HF stack):
 
 ```bash
-!pip -q install --no-cache-dir --index-url https://download.pytorch.org/whl/cu124 \
+%%bash
+set -e
+pip install --no-cache-dir --index-url https://download.pytorch.org/whl/cu124 \
   torch==2.5.1 torchvision==0.20.1 torchaudio==2.5.1
-!pip -q install -U \
+pip install -U --no-cache-dir \
   "transformers>=4.41.0,<7.0.0" \
   accelerate bitsandbytes huggingface_hub tokenizers \
   sentence-transformers scikit-learn numpy
+python -c "import torch, transformers; print('torch', torch.__version__, 'transformers', transformers.__version__)"
 ```
+
+Avoid mixing `!pip ...\\` line continuations with broken escaping in notebooks; use **`%%bash`** cells like above.
 
 ### If you already bulk-uninstalled and Colab is “broken”
 1. **Runtime → Restart session** (clears half-installed state).
