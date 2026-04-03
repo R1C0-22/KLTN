@@ -7,7 +7,7 @@
 
 These are environment/package mismatch issues (not AnRe logic bugs).
 
-## Fix: clean reinstall ML stack (recommended for A100)
+## Fix: reinstall ML stack (recommended for A100)
 Run this shell block **in your Colab notebook** (once per runtime, before running the pipeline):
 
 ```bash
@@ -20,8 +20,15 @@ Run this shell block **in your Colab notebook** (once per runtime, before runnin
 ```
 
 Notes:
+- Keep **`huggingface_hub`** and **`tokenizers`** in the **second** `pip install` line (do not stop after installing only `torch`, or you will see dependency conflicts).
 - After this install, **Runtime -> Restart session**.
 - Do not keep stale imports from old runtime. Re-run all setup cells after restart.
+
+### Long prompts / PDC scoring (HF 8k models)
+If `predict_next_object` fails in `cloud_adapter.py` with **“Could not find '[' in model output”**, the long-term scorer prompt was too long for the context window. Fix:
+- Chunk scoring (default **32** events per LLM call): set `LLM_SCORE_CHUNK_SIZE=32` (or `24` on tighter GPUs).
+- Optional: `HF_MAX_INPUT_TOKENS=6000`, `HF_SCORE_MAX_NEW_TOKENS=128`.
+- Last resort for debugging: `LLM_SCORE_PARSE_FALLBACK=1` (deterministic pseudo-scores if JSON parse fails).
 
 ## Env variables for this repo (A100)
 Example for **Llama 3**:
@@ -32,6 +39,8 @@ os.environ["LLM_PROVIDER"] = "hf"
 os.environ["HF_MODEL_ID"] = "meta-llama/Meta-Llama-3-8B-Instruct"
 os.environ["HF_LOAD_IN_4BIT"] = "0"        # A100: safe; set "1" if you want 4-bit
 os.environ["HF_MAX_NEW_TOKENS"] = "200"
+os.environ["HF_SCORE_MAX_NEW_TOKENS"] = "128"
+os.environ["LLM_SCORE_CHUNK_SIZE"] = "32"
 os.environ["HF_DO_SAMPLE"] = "0"
 # For gated models (Llama): set HF_TOKEN
 # os.environ["HF_TOKEN"] = "hf_xxx"
@@ -45,6 +54,8 @@ os.environ["LLM_PROVIDER"] = "hf"
 os.environ["HF_MODEL_ID"] = "Qwen/Qwen2.5-7B-Instruct"
 os.environ["HF_LOAD_IN_4BIT"] = "0"
 os.environ["HF_MAX_NEW_TOKENS"] = "200"
+os.environ["HF_SCORE_MAX_NEW_TOKENS"] = "128"
+os.environ["LLM_SCORE_CHUNK_SIZE"] = "32"
 os.environ["HF_DO_SAMPLE"] = "0"
 os.environ["TKG_DATA_DIR"] = "data/ICEWS05-15"
 ```

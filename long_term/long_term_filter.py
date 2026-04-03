@@ -108,6 +108,40 @@ def _make_question_from_query_event(query_event: Any) -> str:
     return re.sub(r"\s*\?\s*$", " whom?", masked_sentence, flags=re.I)
 
 
+def _compute_scores_one_chunk(
+    history_chunk: Sequence[Any],
+    query_event: Any,
+    *,
+    prompt_template: str,
+    score_fn: Any,
+) -> list[float]:
+    """One LLM scoring call for *history_chunk* only (local indices 1..len(chunk))."""
+    labeled_events = []
+    for i, ev in enumerate(history_chunk, start=1):
+        s, r, o, t = _extract_event_fields(ev)
+        labeled_events.append(f"{i}. ({s}, {r}, {o}, {t})")
+
+    labeled_history = "\n".join(labeled_events)
+    query_text = _make_question_from_query_event(query_event)
+    prompt = prompt_template.format(
+        history=labeled_history,
+        events=labeled_history,
+        query=query_text,
+        n=len(history_chunk),
+    )
+
+    logits = score_fn(prompt, list(history_chunk))
+    expected = len(history_chunk)
+    if len(logits) < expected:
+        raise ValueError(
+            f"LLM scorer returned {len(logits)} scores but chunk has {expected} events."
+        )
+    if len(logits) > expected:
+        logits = list(logits)[:expected]
+
+    return [float(x) for x in logits]
+
+
 def compute_scores_with_llm(history: Sequence[Any], query_event: Any) -> list[float]:
     """Compute per-event effectiveness *logits/scores* using an LLM scorer.
 
@@ -129,41 +163,39 @@ def compute_scores_with_llm(history: Sequence[Any], query_event: Any) -> list[fl
     The paper normalizes these scores with a softmax *within each time-step
     group* H^{t_j} when computing p(hl). Therefore this function returns raw
     logits; :func:`filter_long_term` performs the per-group softmax.
+
+    For local / Hugging Face models with limited context (e.g. 8k), scoring
+    *all* long-term events in one prompt can overflow context and produce
+    invalid generations (no JSON array). We therefore score in contiguous
+    chunks along ``history`` order.
+
+    Environment:
+        LLM_SCORE_CHUNK_SIZE — max events per scoring call (default: 32).
+        Set to 0 or negative to use one call for the full history (old behaviour).
     """
     if not history:
         return []
 
+    chunk_size = int(os.environ.get("LLM_SCORE_CHUNK_SIZE", "32"))
+    if chunk_size <= 0:
+        chunk_size = len(history)
+
     prompt_template = _load_prompt_template()
     score_fn = _load_llm_scorer_from_env()
 
-    labeled_events = []
-    for i, ev in enumerate(history, start=1):
-        s, r, o, t = _extract_event_fields(ev)
-        labeled_events.append(f"{i}. ({s}, {r}, {o}, {t})")
-
-    # The template is user-defined; support common placeholders.
-    # Following the paper, we build a natural-language question from the masked query.
-    labeled_history = "\n".join(labeled_events)
-    query_text = _make_question_from_query_event(query_event)
-    prompt = prompt_template.format(
-        history=labeled_history,
-        events=labeled_history,
-        query=query_text,
-        n=len(history),
-    )
-
-    # The scorer returns logits/scores for each event in the same order.
-    logits = score_fn(prompt, list(history))
-    expected = len(history)
-    if len(logits) < expected:
-        raise ValueError(
-            f"LLM scorer returned {len(logits)} scores but history has {expected} events."
+    all_logits: list[float] = []
+    for start in range(0, len(history), chunk_size):
+        chunk = history[start : start + chunk_size]
+        all_logits.extend(
+            _compute_scores_one_chunk(
+                chunk,
+                query_event,
+                prompt_template=prompt_template,
+                score_fn=score_fn,
+            )
         )
-    if len(logits) > expected:
-        # Be robust to models that output extra values.
-        logits = list(logits)[:expected]
 
-    return [float(x) for x in logits]
+    return all_logits
 
 
 def dynamic_threshold(F: int, delta_t: float, T: float, alpha: float) -> float:

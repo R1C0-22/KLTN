@@ -27,11 +27,17 @@ For Groq:
     GROQ_MODEL=...
 
 On Colab you typically just export those env vars at the notebook level.
+
+Long-term PDC scoring (`score_fn`) extras (Hugging Face):
+    HF_SCORE_MAX_NEW_TOKENS=128     # optional; keeps JSON-score generations short
+    LLM_SCORE_PARSE_FALLBACK=1      # optional; if model output is not a JSON array, use deterministic pseudo-scores
 """
 
 from __future__ import annotations
 
+import hashlib
 import json
+import os
 from typing import Any, Sequence, List
 
 from .unified import call_llm
@@ -82,6 +88,17 @@ def _extract_first_json_array(text: str) -> List[float]:
     raise ValueError(f"Unclosed JSON array in model output: {text[:200]!r}")
 
 
+def _fallback_scores(prompt: str, events: Sequence[Any]) -> List[float]:
+    """Deterministic pseudo-logits when the model does not return parseable JSON."""
+    scores: List[float] = []
+    for ev in events:
+        s = repr(ev) + "|" + prompt[:200]
+        h = hashlib.sha256(s.encode("utf-8")).hexdigest()
+        v = int(h[:8], 16) / 0xFFFFFFFF
+        scores.append((v * 2.0) - 1.0)
+    return scores
+
+
 def score_fn(prompt: str, events: Sequence[Any]) -> List[float]:
     """
     Long-term history scoring used by `compute_scores_with_llm`.
@@ -89,10 +106,28 @@ def score_fn(prompt: str, events: Sequence[Any]) -> List[float]:
     The prompt (from `prompts/filter_prompt.txt`) must instruct the model
     to output ONLY a JSON array of real-valued logits, one per event.
     """
-    raw = call_llm(prompt)
+    score_tok = os.environ.get("HF_SCORE_MAX_NEW_TOKENS", "").strip()
+    saved_tok = os.environ.get("HF_MAX_NEW_TOKENS")
+    if score_tok:
+        os.environ["HF_MAX_NEW_TOKENS"] = score_tok
+    try:
+        raw = call_llm(prompt)
+    finally:
+        if score_tok:
+            if saved_tok is None:
+                os.environ.pop("HF_MAX_NEW_TOKENS", None)
+            else:
+                os.environ["HF_MAX_NEW_TOKENS"] = saved_tok
+
     if not isinstance(raw, str):
         raw = str(raw)
-    scores = _extract_first_json_array(raw.strip())
+    try:
+        scores = _extract_first_json_array(raw.strip())
+    except ValueError:
+        fb = os.environ.get("LLM_SCORE_PARSE_FALLBACK", "").strip().lower()
+        if fb in ("1", "true", "yes", "on"):
+            return _fallback_scores(prompt, events)
+        raise
 
     expected = len(events)
     if len(scores) < expected:

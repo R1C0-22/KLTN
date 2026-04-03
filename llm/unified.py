@@ -35,6 +35,7 @@ For Hugging Face local (Colab GPU — download weights, matches paper model fami
     HF_LOAD_IN_4BIT=1                # default on; use 0 for full FP16 if VRAM allows
     HF_MAX_NEW_TOKENS=512
     HF_TRUST_REMOTE_CODE=0           # set 1 only if the model card asks for it
+    HF_MAX_INPUT_TOKENS=...          # optional cap on *prompt* tokens (truncate); avoids HF crashes on long PDC prompts
 
     pip install torch transformers accelerate bitsandbytes
 
@@ -264,6 +265,19 @@ def _call_huggingface(prompt: str) -> str:
     tokenizer = _hf_tokenizer
     messages = [{"role": "user", "content": prompt}]
 
+    max_new = int(os.environ.get("HF_MAX_NEW_TOKENS", "512"))
+    cfg = model.config
+    model_ctx = getattr(cfg, "max_position_embeddings", None) or getattr(
+        cfg, "n_positions", None
+    )
+    if model_ctx is None:
+        model_ctx = int(os.environ.get("HF_DEFAULT_MODEL_CONTEXT", "8192"))
+    input_cap_override = os.environ.get("HF_MAX_INPUT_TOKENS", "").strip()
+    if input_cap_override:
+        input_cap = max(64, int(input_cap_override))
+    else:
+        input_cap = max(256, int(model_ctx) - max_new - 64)
+
     attention_mask: Any | None = None
     if getattr(tokenizer, "chat_template", None):
         # Some transformer/tokenizer versions return non-tensor objects from
@@ -275,9 +289,21 @@ def _call_huggingface(prompt: str) -> str:
             add_generation_prompt=True,
             tokenize=False,
         )
-        enc = tokenizer(prompt_text, return_tensors="pt", padding=False)
+        enc = tokenizer(
+            prompt_text,
+            return_tensors="pt",
+            padding=False,
+            truncation=True,
+            max_length=input_cap,
+        )
     else:
-        enc = tokenizer(prompt, return_tensors="pt", padding=False)
+        enc = tokenizer(
+            prompt,
+            return_tensors="pt",
+            padding=False,
+            truncation=True,
+            max_length=input_cap,
+        )
 
     input_ids = enc["input_ids"]
     attention_mask = enc.get("attention_mask")
@@ -294,7 +320,6 @@ def _call_huggingface(prompt: str) -> str:
     if attention_mask is not None:
         attention_mask = attention_mask.to(device)
 
-    max_new = int(os.environ.get("HF_MAX_NEW_TOKENS", "512"))
     do_sample = _env_truthy("HF_DO_SAMPLE", False)
     gen_kwargs: dict[str, Any] = dict(
         max_new_tokens=max_new,
