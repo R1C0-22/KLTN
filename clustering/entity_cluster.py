@@ -299,8 +299,12 @@ def cluster_entities(
     device: str | None = None,
     random_state: int = 42,
     show_progress: bool = True,
+    use_prompt_prefix: bool = True,
 ) -> ClusterResult:
     """End-to-end pipeline: embed -> find K -> cluster -> return result.
+
+    Implements §3.1 of the AnRe paper (Tang et al., ACL 2025):
+    Entity semantic clustering using vector representations and K-means.
 
     Parameters
     ----------
@@ -324,6 +328,11 @@ def cluster_entities(
         Seed for KMeans reproducibility.
     show_progress : bool
         Show progress bars.
+    use_prompt_prefix : bool
+        If True (default), prepend a semantic context prefix to entity
+        names before encoding. This improves clustering quality by
+        placing semantically related entities (e.g., "Xi Jinping" and
+        "China") closer together in embedding space.
 
     Returns
     -------
@@ -339,6 +348,7 @@ def cluster_entities(
             )
         logger.info("Using %d pre-computed embeddings", len(embeddings))
     else:
+        prompt_prefix = _ENTITY_PROMPT_PREFIX if use_prompt_prefix else None
         logger.info("Embedding %d entities with '%s' ...", len(entities), model_name)
         embeddings = embed_entities(
             entities,
@@ -346,6 +356,7 @@ def cluster_entities(
             batch_size=batch_size,
             device=device,
             show_progress=show_progress,
+            prompt_prefix=prompt_prefix,
         )
 
     sil_scores: dict[int, float] = {}

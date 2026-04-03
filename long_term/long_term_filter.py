@@ -228,21 +228,43 @@ def dynamic_threshold(F: int, delta_t: float, T: float, alpha: float) -> float:
     return base + (1.0 - base) * (ratio**alpha)
 
 
+def _get_date_key(dt: datetime) -> str:
+    """Extract DATE (day) key from datetime for time-step grouping.
+    
+    Paper §3.2.2: Groups events by "time step" which in ICEWS/GDELT
+    datasets corresponds to DAYS, not exact timestamps.
+    """
+    return dt.strftime("%Y-%m-%d")
+
+
 def filter_long_term(
     history: Sequence[Any],
     scores: Sequence[float],
     *,
     query_time: str | None = None,
+    alpha: float = 2.75,
 ) -> list[Any]:
     """Filter long-term history events using dynamic thresholds.
 
-    Because the paper partitions history into time steps {t_j}, we group
-    events in `history` by their exact parsed timestamp. For each timestamp
-    group, we compute its dynamic threshold c_j and keep events with
-    p(hl) >= c_j, where p(hl) is the softmax-normalized probability over
-    logits *within the same time-step group*.
+    Paper §3.2.2 - Dynamic Threshold Filtering (DTF):
+    Partitions history into time steps {t_j} where each time step is a DAY
+    (not exact timestamp). For each time-step group, we:
+    1. Compute softmax probabilities within the group (PDC)
+    2. Calculate dynamic threshold c_j based on time difference
+    3. Keep events where p(hl) >= c_j
 
     The returned list keeps chronological order (oldest -> newest).
+    
+    Parameters
+    ----------
+    history : Sequence[Any]
+        Long-term history events (HL = Hi - HS)
+    scores : Sequence[float]
+        LLM-computed effectiveness logits for each event
+    query_time : str | None
+        Query timestamp for computing time differences
+    alpha : float
+        DTF variation factor (default 2.75 per paper §6.1)
     """
     if not history:
         return []
@@ -250,14 +272,14 @@ def filter_long_term(
         raise ValueError("history and scores must have the same length.")
 
     # Parse timestamps for ordering and for Δt/T computations.
-    parsed: list[tuple[int, Any, float | None]] = []
+    parsed: list[tuple[int, Any, datetime | None, str | None]] = []
     for idx, ev in enumerate(history):
         _, _, _, ts = event_fields(ev)
         dt = parse_timestamp(ts)
-        parsed.append((idx, ev, dt.timestamp() if dt is not None else None))
+        date_key = _get_date_key(dt) if dt is not None else None
+        parsed.append((idx, ev, dt, date_key))
 
     # Keep only parseable timestamps for dynamic threshold computation.
-    # If nothing is parseable, return history unchanged.
     ts_values = [p[2] for p in parsed if p[2] is not None]
     if not ts_values:
         return list(history)
@@ -267,50 +289,56 @@ def filter_long_term(
     if query_time is not None:
         q_dt = parse_timestamp(query_time)
         if q_dt is None:
-            # If query_time is malformed, degrade gracefully to history-based t_q.
             t_q = max(ts_values)
         else:
-            t_q = q_dt.timestamp()
+            t_q = q_dt
     else:
         t_q = max(ts_values)
 
     t_min = min(ts_values)
-    T = t_q - t_min
-    if T <= 0:
-        return list(history)
+    
+    # T = total time span in DAYS (paper uses day-level granularity)
+    T_days = (t_q - t_min).days
+    if T_days <= 0:
+        T_days = 1  # Avoid division by zero; minimum 1 day span
 
-    # Group events by their timestamp seconds.
-    groups: dict[float, list[int]] = {}
-    for idx, _, sec in parsed:
-        if sec is None:
+    # Group events by their DATE (day), not exact timestamp.
+    # Paper §3.2.2: "Partition HL into historical sets for each time step"
+    groups: dict[str, list[int]] = {}
+    for idx, _, dt, date_key in parsed:
+        if date_key is None:
             continue
-        groups.setdefault(sec, []).append(idx)
+        groups.setdefault(date_key, []).append(idx)
 
-    # Determine threshold per group.
-    alpha = 2.75
-    thresholds: dict[float, float] = {}
-    for sec, idxs in groups.items():
-        F = len(idxs)
-        delta_t = t_q - sec
-        thresholds[sec] = dynamic_threshold(F=F, delta_t=delta_t, T=T, alpha=alpha)
-
-    # Filter by comparing each event's within-group softmax probability
-    # with its group's threshold.
+    # Determine threshold per time-step group using paper's formula (Eq. 2).
+    # c_j = 1/F + (1 - 1/F) * (Δt / T)^α
     keep_by_idx = set()
-    for sec, idxs in groups.items():
-        c = thresholds[sec]
+    
+    for date_key, idxs in groups.items():
+        # F = size of events at this time step
+        F = len(idxs)
+        
+        # Δt = time difference between query and this time step (in days)
+        group_date = datetime.strptime(date_key, "%Y-%m-%d")
+        delta_t_days = (t_q - group_date).days
+        if delta_t_days < 0:
+            delta_t_days = 0
+        
+        # Calculate dynamic threshold c_j
+        c_j = dynamic_threshold(F=F, delta_t=delta_t_days, T=T_days, alpha=alpha)
+        
+        # Compute softmax probabilities WITHIN this time-step group (PDC)
         group_logits = [float(scores[idx]) for idx in idxs]
         group_probs = _softmax(group_logits)
+        
+        # Keep events where p(hl) >= c_j
         for idx_local, idx in enumerate(idxs):
-            if group_probs[idx_local] >= c:
+            if group_probs[idx_local] >= c_j:
                 keep_by_idx.add(idx)
 
     # Return in chronological order.
     chronological = sorted(
-        [
-            (i, ev, parse_timestamp(event_fields(ev)[3]) or datetime.min)
-            for i, ev, _ in parsed
-        ],
+        [(i, ev, dt or datetime.min) for i, ev, dt, _ in parsed],
         key=lambda x: x[2],
     )
     return [ev for i, ev, _ in chronological if i in keep_by_idx]
@@ -342,6 +370,30 @@ def subtract_short_term(
     return result
 
 
+def _partition_by_timestep(
+    history: Sequence[Any],
+) -> list[tuple[str, list[Any]]]:
+    """Partition history into time-step groups, sorted by date (newest first).
+    
+    Paper §3.2.2: "We partition HL into historical sets for each time step,
+    denoted as H^{tj}"
+    
+    Returns list of (date_key, events) tuples, sorted reverse chronologically.
+    """
+    groups: dict[str, list[Any]] = {}
+    
+    for ev in history:
+        _, _, _, ts = event_fields(ev)
+        dt = parse_timestamp(ts)
+        if dt is not None:
+            date_key = _get_date_key(dt)
+            groups.setdefault(date_key, []).append(ev)
+    
+    # Sort by date, newest (closest to query) first
+    sorted_groups = sorted(groups.items(), key=lambda x: x[0], reverse=True)
+    return sorted_groups
+
+
 def extract_dual_history(
     full_history: Sequence[Any],
     query_event: Any,
@@ -354,9 +406,11 @@ def extract_dual_history(
     Paper §3.2 Dual History Extraction:
     1. HS = get_short_term(Hi, l) - last l events
     2. HL = Hi - HS - subtract short-term first!
-    3. Partition HL by timestamp, apply PDC + DTF
-    4. Retrieve backwards until sufficient length L
-    5. Return (HS, HL) for concatenation
+    3. Partition HL by timestamp into time-step groups H^{tj}
+    4. For each time step, apply PDC (LLM scoring) + DTF (dynamic threshold)
+    5. Start retrieving from time step tli-1 in REVERSE chronological order
+       until the long-term history length is sufficient
+    6. Sort final result in chronological order
     
     Parameters
     ----------
@@ -378,28 +432,91 @@ def extract_dual_history(
     """
     from short_term import get_short_term
     
+    # Step 1: Get short-term history (last l events)
     short_term = get_short_term(full_history, l=l)
     
+    # Step 2: HL = Hi - HS (subtract short-term from full history)
     long_term_pool = subtract_short_term(full_history, short_term)
     
     if not long_term_pool:
         return short_term, []
     
-    scores = compute_scores_with_llm(long_term_pool, query_event)
+    # Target length for long-term history
+    target_long_term_len = max(0, L - len(short_term))
+    if target_long_term_len == 0:
+        return short_term, []
     
+    # Get query time for computing time differences
     _, _, _, query_time = event_fields(query_event)
-    long_term_filtered = filter_long_term(
-        long_term_pool, 
-        scores, 
-        query_time=query_time,
+    q_dt = parse_timestamp(query_time)
+    if q_dt is None:
+        # Fallback: use latest event time
+        for ev in reversed(long_term_pool):
+            dt = parse_timestamp(event_fields(ev)[3])
+            if dt is not None:
+                q_dt = dt
+                break
+    
+    if q_dt is None:
+        # Can't compute time differences, return empty
+        return short_term, []
+    
+    # Find earliest timestamp in HL for computing T
+    earliest_dt = None
+    for ev in long_term_pool:
+        dt = parse_timestamp(event_fields(ev)[3])
+        if dt is not None:
+            if earliest_dt is None or dt < earliest_dt:
+                earliest_dt = dt
+    
+    if earliest_dt is None:
+        return short_term, []
+    
+    T_days = (q_dt - earliest_dt).days
+    if T_days <= 0:
+        T_days = 1
+    
+    # Step 3: Partition HL by time-step (day), sorted reverse chronologically
+    timestep_groups = _partition_by_timestep(long_term_pool)
+    
+    # Step 4-5: Retrieve backwards from tli-1 until sufficient length
+    # Paper: "We start retrieving from time step tli-1 in reverse chronological 
+    #         order until the long-term history length is sufficient"
+    long_term_selected: list[Any] = []
+    
+    for date_key, events in timestep_groups:
+        if len(long_term_selected) >= target_long_term_len:
+            break
+        
+        # Score events in this time-step using LLM (PDC)
+        scores = compute_scores_with_llm(events, query_event)
+        
+        # Compute dynamic threshold for this time-step
+        F = len(events)
+        group_date = datetime.strptime(date_key, "%Y-%m-%d")
+        delta_t_days = (q_dt - group_date).days
+        if delta_t_days < 0:
+            delta_t_days = 0
+        
+        c_j = dynamic_threshold(F=F, delta_t=delta_t_days, T=T_days, alpha=alpha)
+        
+        # Apply softmax within this time-step group and filter by threshold
+        probs = _softmax(scores)
+        
+        for idx, (ev, prob) in enumerate(zip(events, probs)):
+            if prob >= c_j:
+                long_term_selected.append(ev)
+    
+    # Truncate if we have more than needed
+    if len(long_term_selected) > target_long_term_len:
+        long_term_selected = long_term_selected[:target_long_term_len]
+    
+    # Step 6: Sort in chronological order before returning
+    long_term_selected.sort(
+        key=lambda ev: parse_timestamp(event_fields(ev)[3]) or datetime.min
     )
     
-    target_long_term_len = max(0, L - len(short_term))
-    
-    if len(long_term_filtered) > target_long_term_len:
-        long_term_filtered = long_term_filtered[-target_long_term_len:]
-    
-    return short_term, long_term_filtered
+    return short_term, long_term_selected
 
 
 def combine_dual_history(

@@ -168,15 +168,17 @@ def find_similar_events_from_cluster(
     all_data: Sequence[Any],
     top_a: int = 1,
     min_contexts: int = MIN_HISTORY_CONTEXTS,
+    min_history_length: int = 100,
     model: SentenceTransformer | None = None,
 ) -> list[SimilarEventCandidate]:
     """Find similar events from entities in the same cluster.
     
-    Paper Algorithm 1, lines 4-10:
+    Paper Algorithm 1, lines 4-10 and §3.3:
     For each si ∈ X (cluster) where si ≠ sq:
       - Hi, ei ← CandiFilter(Hn, rq, si)
       - Find similar event with same relation
       - Rank by semantic similarity
+      - Filter out events where history length < L (§3.3)
       - Return top 'a' candidates
     
     Parameters
@@ -190,7 +192,11 @@ def find_similar_events_from_cluster(
     top_a : int
         Number of top similar events to return (default 1)
     min_contexts : int
-        Minimum history contexts required (default 300)
+        Minimum history contexts required for filtering Ei (default 300)
+    min_history_length : int
+        Minimum history length L for analogical examples (default 100).
+        Paper §3.3: "we filter out ei from Hi if its length is less than
+        the total length L"
     model : SentenceTransformer | None
         Embedding model for similarity computation
     
@@ -237,6 +243,12 @@ def find_similar_events_from_cluster(
                     h for h in history
                     if (parse_timestamp(event_fields(h)[3]) or datetime.min) < ev_dt
                 ]
+            
+            # Paper §3.3: "we filter out ei from Hi if its length is less 
+            # than the total length L"
+            if len(history) < min_history_length:
+                continue
+            
             all_candidates.append((ev, sim_score, si, history))
     
     all_candidates.sort(key=lambda x: x[1], reverse=True)

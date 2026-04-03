@@ -193,6 +193,7 @@ def predict_next_object(
         all_data=data,
         top_a=a,
         min_contexts=int(os.environ.get("MIN_HISTORY_CONTEXTS", "300")),
+        min_history_length=L,  # Paper §3.3: filter events with history < L
     )
     
     if similar_candidates:
