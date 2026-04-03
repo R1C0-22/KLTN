@@ -236,37 +236,6 @@ def format_analogical_examples_for_prompt(
     return "\n".join(formatted)
 
 
-def generate_analogical_reasoning(event: Any, similar_events: Sequence[Any]) -> str:
-    """Legacy function for backward compatibility.
-    
-    DEPRECATED: Use construct_analogical_examples_batch() instead for
-    proper paper implementation.
-    
-    This function generates reasoning text but doesn't follow the
-    paper's exact analogical example format.
-    """
-    prompt_template = _load_prompt_template()
-    generator = _load_llm_generator_from_env()
-
-    event_text = _event_to_text(event)
-    similar_lines = "\n".join(_event_to_text(e) for e in similar_events)
-
-    prompt = prompt_template.format(
-        history=similar_lines,
-        question=event_text,
-        answer="[unknown - analyzing patterns]",
-    )
-
-    try:
-        out = generator(prompt)
-    except TypeError:
-        out = generator(prompt=prompt)
-
-    if not isinstance(out, str):
-        out = str(out)
-    return out.strip()
-
-
 if __name__ == "__main__":
     os.environ.setdefault("LLM_GENERATOR", "analogical.dummy_generator:generate_fn")
     

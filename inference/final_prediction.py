@@ -19,29 +19,6 @@ Key components:
   - Candidate History Filter (§3.1)
   - Dual History Extraction (§3.2)
   - Analogical Replay (§3.3)
-"""
-
-"""
-Final prediction module for Temporal Knowledge Graph Forecasting.
-
-Implements the complete AnRe pipeline (Algorithm 1, Tang et al., ACL 2025):
-
-  Require: Entity Set V, History Events Hn, LLM, Query q = (sq, rq, ?, tn+1)
-  Ensure: Object Entity Prediction oq
-  
-  1. V' ← Clustering(V)
-  2. X ← ClusterRetriever(V', sq)
-  3. A, P ← ∅, ∅
-  4-16. For each si in X: build histories and find similar events
-  17. For similar events: construct analogical examples
-  18-21. Generate analysis processes
-  22. oq ← Infer(LLM(P, Hq, q, Oq))
-
-Key components:
-  - Semantic-driven Historical Clustering (§3.1)
-  - Candidate History Filter (§3.1)
-  - Dual History Extraction (§3.2)
-  - Analogical Replay (§3.3)
 
 Paper §3.3 Prediction Method:
   "We map each candidate entity to a numerical token, obtain the
@@ -60,7 +37,7 @@ import os
 from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
-from typing import Any, Callable, Sequence, List
+from typing import Any, Callable, Sequence
 
 from common import event_fields, parse_timestamp
 
@@ -147,201 +124,24 @@ def _extract_predicted_object(llm_output: str, candidates: Sequence[str]) -> str
     return first
 
 
-def predict_next_object(
-    query_event: Any,
-    cluster_result=None,
-    use_second_order_candidates: bool = False,
-) -> str:
-    """Predict the missing object entity for a query (s, r, ?, t).
-    
-    Implements Algorithm 1 from the AnRe paper.
-    
-    Parameters
-    ----------
-    query_event : Any
-        Query as (subject, relation, "?", timestamp)
-    cluster_result : ClusterResult, optional
-        Pre-computed clustering result. If None, clustering is performed.
-    use_second_order_candidates : bool
-        If True, use O²q (second-order neighbors) as candidate set.
-        Default False uses Oq (first-order only).
-    
-    Returns
-    -------
-    str
-        The predicted object entity
-    """
-    from preprocessing import verbalize_event
-    from history import get_entity_history
-    from short_term import get_short_term
-    from long_term import extract_dual_history, combine_dual_history
-    from clustering.entity_cluster import cluster_entities, extract_entities
-    from clustering.candidate_filter import (
-        find_similar_events_from_cluster,
-        build_candidate_set,
-        build_candidate_set_second_order,
-    )
-    from analogical import (
-        construct_analogical_examples_batch,
-        format_analogical_examples_for_prompt,
-    )
-
-    s, r, o, t = event_fields(query_event)
-    sq = s.strip()
-    rq = r.strip()
-    
-    data = _load_history_data(query_event)
-    
-    if cluster_result is None:
-        entities = extract_entities(data)
-        cluster_result = cluster_entities(entities)
-    
-    try:
-        cluster_X = cluster_result.get_cluster_of(sq)
-    except KeyError:
-        cluster_X = [sq]
-    
-    entity_history_q = get_entity_history(sq, data)
-    
-    query_dt = parse_timestamp(t)
-    if query_dt is not None:
-        entity_history_q = [
-            ev for ev in entity_history_q
-            if (parse_timestamp(event_fields(ev)[3]) or datetime.min) < query_dt
-        ]
-    
-    l = int(os.environ.get("SHORT_TERM_L", "20"))
-    L = int(os.environ.get("HISTORY_LENGTH_L", "100"))
-    a = int(os.environ.get("NUM_ANALOGICAL_EXAMPLES", "1"))
-    
-    masked_query = (sq, rq, "?", t)
-    short_term_q, long_term_q = extract_dual_history(
-        full_history=entity_history_q,
-        query_event=masked_query,
-        l=l,
-        L=L,
-    )
-    history_q = combine_dual_history(short_term_q, long_term_q)
-    
-    if use_second_order_candidates:
-        candidate_set = build_candidate_set_second_order(entity_history_q, sq, data)
-    else:
-        candidate_set = build_candidate_set(entity_history_q, sq)
-    
-    similar_candidates = find_similar_events_from_cluster(
-        query_event=masked_query,
-        cluster_entities=cluster_X,
-        all_data=data,
-        top_a=a,
-        min_contexts=int(os.environ.get("MIN_HISTORY_CONTEXTS", "300")),
-        min_history_length=L,  # Paper §3.3: filter events with history < L
-    )
-    
-    if similar_candidates:
-        analogical_examples = construct_analogical_examples_batch(similar_candidates)
-        analogical_text = format_analogical_examples_for_prompt(analogical_examples)
-    else:
-        analogical_text = "- No analogical examples available -"
-    
-    history_lines = []
-    for ev in history_q:
-        ev_s, ev_r, ev_o, ev_t = event_fields(ev)
-        history_lines.append(verbalize_event(ev_s, ev_r, ev_o, ev_t))
-    history_text = "\n".join(history_lines) if history_lines else "- none -"
-    
-    query_sentence = _verbalize_query_masked(sq, rq, t)
-    
-    candidates_numbered = []
-    for i, c in enumerate(candidate_set, start=1):
-        candidates_numbered.append(f"{i}. {c}")
-    candidates_text = "\n".join(candidates_numbered) if candidates_numbered else "- none -"
-    
-    code_root = Path(__file__).resolve().parents[1]
-    prompt_path = code_root / "prompts" / "prediction_prompt.txt"
-    if not prompt_path.is_file():
-        raise FileNotFoundError(f"Missing prediction prompt: {prompt_path}")
-    prediction_template = prompt_path.read_text(encoding="utf-8")
-    
-    final_prompt = prediction_template.format(
-        analogical_examples=analogical_text,
-        history=history_text,
-        query=query_sentence,
-        candidates=candidates_text,
-    )
-    
-    # Paper §3.3: Use logprob-based prediction when available
-    # "We map each candidate entity to a numerical token, obtain the
-    # corresponding logarithmic output La from the LLM, and convert it
-    # into a normalized probability using the softmax function"
-    use_logprobs = _env_truthy("USE_LOGPROB_PREDICTION", default=True)
-    
-    if use_logprobs and candidate_set:
-        try:
-            predictor_logprobs = _load_callable_from_env("LLM_PREDICTOR_LOGPROBS")
-            predicted, probabilities = predictor_logprobs(final_prompt, candidate_set)
-            return predicted
-        except Exception:
-            # Fall back to text generation if logprobs not available
-            pass
-    
-    # Fallback: text generation approach
-    predictor_spec = os.environ.get("LLM_PREDICTOR", "").strip()
-    if predictor_spec:
-        predictor = _load_callable_from_env("LLM_PREDICTOR")
-    else:
-        predictor = _load_callable_from_env("LLM_GENERATOR")
-
-    llm_output = predictor(final_prompt)
-    return _extract_predicted_object(str(llm_output), candidate_set)
-
-
 @dataclass
-class PredictionResult:
-    """Container for prediction results with probability distribution.
-    
-    Paper §3.3: "We sort the probability results and select the highest
-    probability result as the final prediction."
-    
-    This class enables Hit@k evaluation by providing ranked candidates.
-    """
-    predicted: str
-    candidates: list[str]
-    probabilities: list[float]
-    
-    def get_ranked_candidates(self) -> list[tuple[str, float]]:
-        """Return candidates sorted by probability (highest first)."""
-        ranked = sorted(
-            zip(self.candidates, self.probabilities),
-            key=lambda x: x[1],
-            reverse=True,
-        )
-        return ranked
-    
-    def hit_at_k(self, ground_truth: str, k: int) -> bool:
-        """Check if ground_truth is in top-k predictions."""
-        ranked = self.get_ranked_candidates()
-        top_k = [c for c, _ in ranked[:k]]
-        return ground_truth in top_k
+class _PredictionContext:
+    """Internal context for prediction pipeline."""
+    candidate_set: list[str]
+    final_prompt: str
 
 
-def predict_next_object_with_probs(
+def _prepare_prediction_context(
     query_event: Any,
-    cluster_result=None,
-    use_second_order_candidates: bool = False,
-) -> PredictionResult:
-    """Predict with full probability distribution for Hit@k evaluation.
+    cluster_result,
+    use_second_order_candidates: bool,
+) -> _PredictionContext:
+    """Prepare all components for prediction (shared logic).
     
-    This function implements the paper's complete prediction approach
-    including probability distribution computation (Paper §3.3).
-    
-    Returns
-    -------
-    PredictionResult
-        Contains predicted entity, all candidates, and their probabilities
+    Implements Algorithm 1 steps 1-21 from the AnRe paper.
     """
     from preprocessing import verbalize_event
     from history import get_entity_history
-    from short_term import get_short_term
     from long_term import extract_dual_history, combine_dual_history
     from clustering.entity_cluster import cluster_entities, extract_entities
     from clustering.candidate_filter import (
@@ -355,8 +155,7 @@ def predict_next_object_with_probs(
     )
 
     s, r, o, t = event_fields(query_event)
-    sq = s.strip()
-    rq = r.strip()
+    sq, rq = s.strip(), r.strip()
     
     data = _load_history_data(query_event)
     
@@ -411,17 +210,14 @@ def predict_next_object_with_probs(
     else:
         analogical_text = "- No analogical examples available -"
     
-    history_lines = []
-    for ev in history_q:
-        ev_s, ev_r, ev_o, ev_t = event_fields(ev)
-        history_lines.append(verbalize_event(ev_s, ev_r, ev_o, ev_t))
+    history_lines = [
+        verbalize_event(*event_fields(ev)[:4]) for ev in history_q
+    ]
     history_text = "\n".join(history_lines) if history_lines else "- none -"
     
     query_sentence = _verbalize_query_masked(sq, rq, t)
     
-    candidates_numbered = []
-    for i, c in enumerate(candidate_set, start=1):
-        candidates_numbered.append(f"{i}. {c}")
+    candidates_numbered = [f"{i}. {c}" for i, c in enumerate(candidate_set, start=1)]
     candidates_text = "\n".join(candidates_numbered) if candidates_numbered else "- none -"
     
     code_root = Path(__file__).resolve().parents[1]
@@ -437,30 +233,131 @@ def predict_next_object_with_probs(
         candidates=candidates_text,
     )
     
-    # Use logprob-based prediction (Paper §3.3)
-    if candidate_set:
+    return _PredictionContext(
+        candidate_set=candidate_set,
+        final_prompt=final_prompt,
+    )
+
+
+def predict_next_object(
+    query_event: Any,
+    cluster_result=None,
+    use_second_order_candidates: bool = False,
+) -> str:
+    """Predict the missing object entity for a query (s, r, ?, t).
+    
+    Implements Algorithm 1 from the AnRe paper.
+    
+    Parameters
+    ----------
+    query_event : Any
+        Query as (subject, relation, "?", timestamp)
+    cluster_result : ClusterResult, optional
+        Pre-computed clustering result. If None, clustering is performed.
+    use_second_order_candidates : bool
+        If True, use O²q (second-order neighbors) as candidate set.
+        Default False uses Oq (first-order only).
+    
+    Returns
+    -------
+    str
+        The predicted object entity
+    """
+    ctx = _prepare_prediction_context(
+        query_event, cluster_result, use_second_order_candidates
+    )
+    
+    use_logprobs = _env_truthy("USE_LOGPROB_PREDICTION", default=True)
+    
+    if use_logprobs and ctx.candidate_set:
         try:
             predictor_logprobs = _load_callable_from_env("LLM_PREDICTOR_LOGPROBS")
-            predicted, probabilities = predictor_logprobs(final_prompt, candidate_set)
+            predicted, _ = predictor_logprobs(ctx.final_prompt, ctx.candidate_set)
+            return predicted
+        except Exception:
+            pass
+    
+    predictor_spec = os.environ.get("LLM_PREDICTOR", "").strip()
+    if predictor_spec:
+        predictor = _load_callable_from_env("LLM_PREDICTOR")
+    else:
+        predictor = _load_callable_from_env("LLM_GENERATOR")
+
+    llm_output = predictor(ctx.final_prompt)
+    return _extract_predicted_object(str(llm_output), ctx.candidate_set)
+
+
+@dataclass
+class PredictionResult:
+    """Container for prediction results with probability distribution.
+    
+    Paper §3.3: "We sort the probability results and select the highest
+    probability result as the final prediction."
+    
+    This class enables Hit@k evaluation by providing ranked candidates.
+    """
+    predicted: str
+    candidates: list[str]
+    probabilities: list[float]
+    
+    def get_ranked_candidates(self) -> list[tuple[str, float]]:
+        """Return candidates sorted by probability (highest first)."""
+        ranked = sorted(
+            zip(self.candidates, self.probabilities),
+            key=lambda x: x[1],
+            reverse=True,
+        )
+        return ranked
+    
+    def hit_at_k(self, ground_truth: str, k: int) -> bool:
+        """Check if ground_truth is in top-k predictions."""
+        ranked = self.get_ranked_candidates()
+        top_k = [c for c, _ in ranked[:k]]
+        return ground_truth in top_k
+
+
+def predict_next_object_with_probs(
+    query_event: Any,
+    cluster_result=None,
+    use_second_order_candidates: bool = False,
+) -> PredictionResult:
+    """Predict with full probability distribution for Hit@k evaluation.
+    
+    This function implements the paper's complete prediction approach
+    including probability distribution computation (Paper §3.3).
+    
+    Returns
+    -------
+    PredictionResult
+        Contains predicted entity, all candidates, and their probabilities
+    """
+    ctx = _prepare_prediction_context(
+        query_event, cluster_result, use_second_order_candidates
+    )
+    
+    if ctx.candidate_set:
+        try:
+            predictor_logprobs = _load_callable_from_env("LLM_PREDICTOR_LOGPROBS")
+            predicted, probabilities = predictor_logprobs(
+                ctx.final_prompt, ctx.candidate_set
+            )
             return PredictionResult(
                 predicted=predicted,
-                candidates=candidate_set,
+                candidates=ctx.candidate_set,
                 probabilities=probabilities,
             )
         except Exception:
             pass
     
-    # Fallback: uniform distribution with text generation
     predictor = _load_callable_from_env("LLM_GENERATOR")
-    llm_output = predictor(final_prompt)
-    predicted = _extract_predicted_object(str(llm_output), candidate_set)
+    llm_output = predictor(ctx.final_prompt)
+    predicted = _extract_predicted_object(str(llm_output), ctx.candidate_set)
     
-    # Assign probability 1.0 to predicted, 0.0 to others
-    probabilities = [1.0 if c == predicted else 0.0 for c in candidate_set]
+    probabilities = [1.0 if c == predicted else 0.0 for c in ctx.candidate_set]
     
     return PredictionResult(
         predicted=predicted,
-        candidates=candidate_set,
+        candidates=ctx.candidate_set,
         probabilities=probabilities,
     )
 
