@@ -40,7 +40,7 @@ import json
 import os
 from typing import Any, Sequence, List
 
-from .unified import call_llm
+from .unified import call_llm, call_llm_logprobs
 
 
 def generate_fn(prompt: str) -> str:
@@ -160,6 +160,59 @@ def predict_fn(prompt: str) -> str:
 
     # Use first line as the entity.
     return text.splitlines()[0].strip()
+
+
+def predict_with_logprobs_fn(
+    prompt: str,
+    candidates: List[str],
+) -> tuple[str, List[float]]:
+    """
+    Final object prediction using logprob-based scoring (Paper §3.3).
+    
+    Paper Algorithm: "We map each candidate entity to a numerical token,
+    obtain the corresponding logarithmic output La from the LLM, and convert
+    it into a normalized probability using the softmax function, resulting
+    in the probability distribution of each candidate answer."
+    
+    Parameters
+    ----------
+    prompt : str
+        The prediction prompt (should end with "Your choice is:")
+    candidates : List[str]
+        List of candidate entity names
+    
+    Returns
+    -------
+    tuple[str, List[float]]
+        (predicted_entity, probability_distribution)
+        The predicted entity is the one with highest probability.
+    """
+    import math
+    
+    # Map candidates to numerical labels (1, 2, 3, ...)
+    # Paper: "we map each candidate entity to a numerical token"
+    labels = [str(i) for i in range(1, len(candidates) + 1)]
+    
+    # Get logprobs for each label
+    # Paper: "obtain the corresponding logarithmic output La from the LLM"
+    logprobs = call_llm_logprobs(prompt, labels)
+    
+    # Convert to probabilities using softmax
+    # Paper: "convert it into a normalized probability using the softmax function"
+    max_logprob = max(logprobs) if logprobs else 0.0
+    exps = [math.exp(lp - max_logprob) for lp in logprobs]
+    total = sum(exps)
+    if total == 0:
+        probs = [1.0 / len(candidates)] * len(candidates)
+    else:
+        probs = [e / total for e in exps]
+    
+    # Select highest probability
+    # Paper: "sort the probability results and select the highest probability result"
+    best_idx = probs.index(max(probs))
+    predicted = candidates[best_idx] if candidates else ""
+    
+    return predicted, probs
 
 
 if __name__ == "__main__":

@@ -14,8 +14,3 @@ Candidate Answers:
 {candidates}
 
 Your choice is:
-
-IMPORTANT (for this codebase):
-- Output ONLY the candidate entity name (exactly as shown in the list above).
-- Do NOT output the number, only the entity name.
-- If unsure, pick the most likely candidate based on the historical patterns.
