@@ -9,7 +9,8 @@ These are environment/package mismatch issues (not AnRe logic bugs).
 
 ## Fix: install / upgrade (without breaking Colab)
 
-**Do not** run `pip uninstall -y torch transformers huggingface_hub ...` on Colab first. That removes packages that **other preinstalled libraries** (`torchtune`, `peft`, `timm`) depend on and triggers long red “dependency conflicts” traces even when your project still works.
+**Do not** run `pip uninstall -y torch transformers huggingface_hub tokenizers ...` on Colab first.  
+That removes packages that **other preinstalled libraries** (`torchtune`, `peft`, `timm`, `sentence-transformers`) depend on. Pip will often print long red lines like **“requires huggingface-hub … which is not installed”** during the *same* install — that is confusing but usually means “resolver saw a transient state”. If imports still work after the cell finishes, you can ignore those lines; if imports break, use **Runtime → Restart session** and re-run the **additive** install below (never bulk-uninstall first).
 
 ### Recommended (additive — KISS)
 Run **once per runtime**, then **Restart session** if pip upgraded something major:
@@ -26,6 +27,27 @@ Run **once per runtime**, then **Restart session** if pip upgraded something maj
   numpy
 ```
 
+### Full “whole cell” shell (copy-paste) — A100 / typical Colab GPU
+Use this **as the only pip cell** when you start a fresh runtime (KISS):
+
+```bash
+%%bash
+set -e
+python -c "import torch; print('torch', torch.__version__, 'cuda', torch.cuda.is_available())" || true
+
+pip -q install -U \
+  "transformers>=4.41.0,<7.0.0" \
+  accelerate \
+  bitsandbytes \
+  huggingface_hub \
+  tokenizers \
+  sentence-transformers \
+  scikit-learn \
+  numpy
+
+python -c "import transformers, huggingface_hub, tokenizers; print('HF stack OK', transformers.__version__)"
+```
+
 ### Only if you truly have a CUDA / torch mismatch
 Try this **instead** of uninstall-everything (still order matters — torch first, then HF stack):
 
@@ -37,6 +59,11 @@ Try this **instead** of uninstall-everything (still order matters — torch firs
   accelerate bitsandbytes huggingface_hub tokenizers \
   sentence-transformers scikit-learn numpy
 ```
+
+### If you already bulk-uninstalled and Colab is “broken”
+1. **Runtime → Restart session** (clears half-installed state).
+2. Re-run **only** the “torch first (optional) + additive HF stack” block above — no `pip uninstall`.
+3. If `import transformers` still fails: factory-reset runtime or start a **new notebook**; avoid uninstall storms.
 
 Notes:
 - After install, **Runtime → Restart session** if you still see import errors.
@@ -61,8 +88,9 @@ os.environ["LLM_SCORE_CHUNK_SIZE"] = "32"
 os.environ["HF_DO_SAMPLE"] = "0"
 # Optional PDC JSON floor (auto minimum is derived from chunk size if unset):
 # os.environ["HF_SCORE_MAX_NEW_TOKENS"] = "512"
-# For gated models (Llama): set HF_TOKEN
-# os.environ["HF_TOKEN"] = "hf_xxx"
+# For gated models (Llama): set HF_TOKEN via Colab Secrets (do not hardcode in repo)
+# from google.colab import userdata
+# os.environ["HF_TOKEN"] = userdata.get("HF_TOKEN")
 os.environ["TKG_DATA_DIR"] = "data/ICEWS05-15"
 ```
 

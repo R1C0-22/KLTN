@@ -44,6 +44,7 @@ For Hugging Face local (Colab GPU — download weights, matches paper model fami
 
 from __future__ import annotations
 
+import copy
 import json
 import os
 import urllib.error
@@ -321,18 +322,36 @@ def _call_huggingface(prompt: str) -> str:
         attention_mask = attention_mask.to(device)
 
     do_sample = _env_truthy("HF_DO_SAMPLE", False)
-    gen_kwargs: dict[str, Any] = dict(
-        max_new_tokens=max_new,
-        do_sample=do_sample,
-        pad_token_id=tokenizer.pad_token_id,
-    )
-    if do_sample:
-        gen_kwargs["temperature"] = float(os.environ.get("HF_TEMPERATURE", "0.2"))
     if attention_mask is not None:
-        gen_kwargs["attention_mask"] = attention_mask
+        gen_in = dict(input_ids=input_ids, attention_mask=attention_mask)
+    else:
+        gen_in = dict(input_ids=input_ids)
 
-    with torch.no_grad():
-        out = model.generate(input_ids, **gen_kwargs)
+    # Avoid noisy HF warnings: model.generation_config often sets max_length=4096
+    # and sampling params while we use greedy decoding — clone and override.
+    try:
+        from transformers import GenerationConfig
+
+        gen_cfg = copy.deepcopy(model.generation_config)
+        gen_cfg.max_length = None
+        gen_cfg.max_new_tokens = max_new
+        gen_cfg.do_sample = do_sample
+        gen_cfg.pad_token_id = tokenizer.pad_token_id
+        if do_sample:
+            gen_cfg.temperature = float(os.environ.get("HF_TEMPERATURE", "0.2"))
+        with torch.no_grad():
+            out = model.generate(**gen_in, generation_config=gen_cfg)
+    except Exception:
+        gen_kwargs: dict[str, Any] = dict(
+            max_new_tokens=max_new,
+            max_length=None,
+            do_sample=do_sample,
+            pad_token_id=tokenizer.pad_token_id,
+        )
+        if do_sample:
+            gen_kwargs["temperature"] = float(os.environ.get("HF_TEMPERATURE", "0.2"))
+        with torch.no_grad():
+            out = model.generate(**gen_in, **gen_kwargs)
 
     new_tokens = out[0, input_ids.shape[1] :]
     return tokenizer.decode(new_tokens, skip_special_tokens=True)
