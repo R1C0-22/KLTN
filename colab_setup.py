@@ -31,6 +31,7 @@ test_prediction()
 
 from __future__ import annotations
 
+import gc
 import os
 import time
 
@@ -43,19 +44,35 @@ MODELS = {
 }
 
 
+def clear_gpu_memory() -> None:
+    """Clear GPU memory cache to prevent OOM errors."""
+    gc.collect()
+    try:
+        import torch
+        if torch.cuda.is_available():
+            torch.cuda.empty_cache()
+            torch.cuda.synchronize()
+    except ImportError:
+        pass
+
+
 def setup(
     model: str = "qwen",
-    load_4bit: bool = False,
-    max_tokens: int = 512,
+    load_4bit: bool = True,
+    max_tokens: int = 256,
     data_dir: str = DEFAULT_DATA_DIR,
+    short_term_l: int = 10,
+    history_length: int = 50,
 ) -> None:
     """Configure environment for HF local LLM inference.
     
     Args:
         model: "qwen", "llama", or full HF model ID
-        load_4bit: Use 4-bit quantization (for T4). A100 can use False.
+        load_4bit: Use 4-bit quantization (default True to prevent OOM)
         max_tokens: Max new tokens for generation
         data_dir: Dataset directory relative to repo root
+        short_term_l: Max short-term history events (paper default: 20)
+        history_length: Max total history length (paper default: 100)
     """
     model_id = MODELS.get(model.lower(), model)
     
@@ -66,8 +83,16 @@ def setup(
     os.environ["TKG_DATA_DIR"] = os.path.join(REPO_ROOT, data_dir)
     os.environ["LLM_SCORE_PARSE_FALLBACK"] = "1"
     
+    os.environ["SHORT_TERM_L"] = str(short_term_l)
+    os.environ["HISTORY_LENGTH_L"] = str(history_length)
+    os.environ["NUM_ANALOGICAL_EXAMPLES"] = "1"
+    os.environ["MIN_HISTORY_CONTEXTS"] = "50"
+    
+    clear_gpu_memory()
+    
     print(f"[setup] model={model_id}")
     print(f"[setup] 4bit={load_4bit}, max_tokens={max_tokens}")
+    print(f"[setup] history: short_term={short_term_l}, total={history_length}")
     print(f"[setup] data={data_dir}")
 
 
@@ -185,7 +210,7 @@ def test_prediction_quick() -> str:
     return pred
 
 
-def test_prediction(sample_size: int = 1000) -> str:
+def test_prediction(sample_size: int = 500) -> str:
     """Test 4b: Full prediction with real data (includes clustering).
     
     WARNING: This is slow (~2-5 min) because it:
@@ -194,7 +219,7 @@ def test_prediction(sample_size: int = 1000) -> str:
     - Runs the complete AnRe pipeline
     
     Args:
-        sample_size: Max entities for clustering (reduces time)
+        sample_size: Max entities for clustering (reduces time and memory)
     """
     from preprocessing import load_dataset
     from inference.final_prediction import predict_next_object
@@ -214,6 +239,7 @@ def test_prediction(sample_size: int = 1000) -> str:
     
     print(f"[test_prediction] Extracting entities...")
     entities = extract_entities(train_data)
+    total_entities = len(entities)
     
     if sample_size and len(entities) > sample_size:
         import random
@@ -224,19 +250,23 @@ def test_prediction(sample_size: int = 1000) -> str:
         if e.object not in sampled:
             sampled.append(e.object)
         entities = sorted(sampled)
-        print(f"[test_prediction] Sampled {len(entities)} entities (from {len(extract_entities(train_data))})")
+        print(f"[test_prediction] Sampled {len(entities)} entities (from {total_entities})")
     
     print(f"[test_prediction] Clustering {len(entities)} entities...")
     with _timer("clustering"):
         cluster_result = cluster_entities(entities)
     
+    clear_gpu_memory()
+    
     print(f"[test_prediction] Running prediction...")
     with _timer("prediction"):
-        pred = predict_next_object(query, cluster_result=cluster_result)
+        pred = predict_next_object(query)
     
     print(f"[test_prediction] predicted={pred}")
     print(f"[test_prediction] ground_truth={e.object}")
     print(f"[test_prediction] correct={pred == e.object}")
+    
+    clear_gpu_memory()
     
     return pred
 
@@ -247,21 +277,25 @@ def test_quick() -> None:
     print("TEST 1: Basic LLM call")
     print("=" * 50)
     test_llm()
+    clear_gpu_memory()
     
     print("\n" + "=" * 50)
     print("TEST 2: Analogical reasoning (paper §3.3)")
     print("=" * 50)
     test_analogical(max_chars=3000)
+    clear_gpu_memory()
     
     print("\n" + "=" * 50)
     print("TEST 3: LLM scoring (paper §3.2 PDC)")
     print("=" * 50)
     test_scoring(n=5)
+    clear_gpu_memory()
     
     print("\n" + "=" * 50)
     print("TEST 4: Quick prediction (synthetic data)")
     print("=" * 50)
     test_prediction_quick()
+    clear_gpu_memory()
     
     print("\n" + "=" * 50)
     print("QUICK TESTS COMPLETED")
@@ -273,10 +307,14 @@ def test_all() -> None:
     """Run all tests including full prediction. Total time: ~3-5 min."""
     test_quick()
     
+    clear_gpu_memory()
+    
     print("\n" + "=" * 50)
     print("TEST 5: Full prediction (real data + clustering)")
     print("=" * 50)
     test_prediction()
+    
+    clear_gpu_memory()
     
     print("\n" + "=" * 50)
     print("ALL TESTS COMPLETED")

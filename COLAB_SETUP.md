@@ -4,6 +4,7 @@
 
 ### Cell 1: Clone and Install
 ```python
+# Mount Drive (optional - cache HF models)
 from google.colab import drive, userdata
 drive.mount('/content/drive')
 
@@ -11,7 +12,11 @@ import os
 os.environ["HF_HOME"] = "/content/drive/MyDrive/hf_cache"
 os.environ["HF_TOKEN"] = userdata.get("HF_TOKEN")  # for gated Llama
 
+# Clone repo + copy data
 !cd /content && rm -rf KLTN && git clone https://github.com/R1C0-22/KLTN.git
+!cp -r /content/drive/MyDrive/data /content/KLTN/  # if data on Drive
+
+# Install dependencies (DO NOT pin numpy!)
 !pip install -q transformers accelerate bitsandbytes sentence-transformers scikit-learn
 ```
 
@@ -67,6 +72,7 @@ debug_scoring_raw(n=3)  # See raw LLM output for scoring
 | `OPENAI_API_KEY is not set` | Set `LLM_PROVIDER=hf` |
 | `Could not infer dtype` | `git pull` + restart runtime |
 | Test 4 hangs at "Batches" | Use `test_prediction_quick()` or wait for clustering |
+| `CUDA out of memory` | Use `setup("llama", load_4bit=True)` (default now) |
 
 ---
 
@@ -85,6 +91,8 @@ debug_scoring_raw(n=3)  # See raw LLM output for scoring
 |----------|-------------|---------|
 | `LLM_PROVIDER` | LLM backend | `hf` |
 | `HF_MODEL_ID` | HuggingFace model | - |
-| `HF_LOAD_IN_4BIT` | 4-bit quantization | `0` |
-| `HF_MAX_NEW_TOKENS` | Max generation length | `512` |
+| `HF_LOAD_IN_4BIT` | 4-bit quantization | `1` (on) |
+| `HF_MAX_NEW_TOKENS` | Max generation length | `256` |
 | `TKG_DATA_DIR` | Dataset directory | `data/ICEWS05-15` |
+| `SHORT_TERM_L` | Short-term history limit | `10` |
+| `HISTORY_LENGTH_L` | Total history limit | `50` |
