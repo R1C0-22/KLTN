@@ -44,6 +44,11 @@ MODELS = {
 }
 
 
+def _log(msg: str) -> None:
+    """Print with flush for real-time output in Colab."""
+    print(msg, flush=True)
+
+
 def clear_gpu_memory() -> None:
     """Clear GPU memory cache to prevent OOM errors."""
     gc.collect()
@@ -63,6 +68,7 @@ def setup(
     data_dir: str = DEFAULT_DATA_DIR,
     short_term_l: int = 10,
     history_length: int = 50,
+    verbose: bool = True,
 ) -> None:
     """Configure environment for HF local LLM inference.
     
@@ -73,6 +79,7 @@ def setup(
         data_dir: Dataset directory relative to repo root
         short_term_l: Max short-term history events (paper default: 20)
         history_length: Max total history length (paper default: 100)
+        verbose: Enable real-time logging (default True)
     """
     model_id = MODELS.get(model.lower(), model)
     
@@ -82,6 +89,7 @@ def setup(
     os.environ["HF_MAX_NEW_TOKENS"] = str(max_tokens)
     os.environ["TKG_DATA_DIR"] = os.path.join(REPO_ROOT, data_dir)
     os.environ["LLM_SCORE_PARSE_FALLBACK"] = "1"
+    os.environ["LLM_VERBOSE"] = "1" if verbose else "0"
     
     os.environ["SHORT_TERM_L"] = str(short_term_l)
     os.environ["HISTORY_LENGTH_L"] = str(history_length)
@@ -90,10 +98,10 @@ def setup(
     
     clear_gpu_memory()
     
-    print(f"[setup] model={model_id}")
-    print(f"[setup] 4bit={load_4bit}, max_tokens={max_tokens}")
-    print(f"[setup] history: short_term={short_term_l}, total={history_length}")
-    print(f"[setup] data={data_dir}")
+    _log(f"[setup] model={model_id}")
+    _log(f"[setup] 4bit={load_4bit}, max_tokens={max_tokens}")
+    _log(f"[setup] history: short_term={short_term_l}, total={history_length}")
+    _log(f"[setup] data={data_dir}")
 
 
 def _timer(name: str):
@@ -104,7 +112,7 @@ def _timer(name: str):
             return self
         def __exit__(self, *args):
             elapsed = time.time() - self.start
-            print(f"[{name}] completed in {elapsed:.1f}s")
+            _log(f"[{name}] completed in {elapsed:.1f}s")
     return Timer()
 
 
@@ -112,10 +120,10 @@ def test_llm() -> str:
     """Test 1: Basic LLM call."""
     from llm.unified import call_llm
     
-    print("[test_llm] calling model...")
+    _log("[test_llm] calling model...")
     with _timer("test_llm"):
         result = call_llm("Say hello in one sentence.")
-    print(f"[test_llm] output: {result}")
+    _log(f"[test_llm] output: {result}")
     return result
 
 
@@ -134,19 +142,19 @@ def test_analogical(max_chars: int = 0) -> str:
         ("Russia", "meet", "Belarus", "2013-01-01"),
     ]
     
-    print(f"[test_analogical] event={event}")
-    print(f"[test_analogical] similar_events={len(similar)}")
+    _log(f"[test_analogical] event={event}")
+    _log(f"[test_analogical] similar_events={len(similar)}")
     
     with _timer("test_analogical"):
         result = generate_analogical_reasoning(event, similar)
     
-    print(f"[test_analogical] output ({len(result)} chars):")
-    print("-" * 40)
+    _log(f"[test_analogical] output ({len(result)} chars):")
+    _log("-" * 40)
     if max_chars > 0 and len(result) > max_chars:
-        print(result[:max_chars] + "...")
+        _log(result[:max_chars] + "...")
     else:
-        print(result)
-    print("-" * 40)
+        _log(result)
+    _log("-" * 40)
     return result
 
 
@@ -159,18 +167,18 @@ def test_scoring(n: int = 5) -> list[float]:
     hist = load_dataset(data_dir, splits=["train"])[:n]
     query = (hist[0].subject, hist[0].relation, "?", hist[0].timestamp)
     
-    print(f"[test_scoring] query={query}")
-    print(f"[test_scoring] n_events={n}")
+    _log(f"[test_scoring] query={query}")
+    _log(f"[test_scoring] n_events={n}")
     
     with _timer("test_scoring"):
         scores = compute_scores_with_llm(hist, query)
     
-    print(f"[test_scoring] scores={scores}")
+    _log(f"[test_scoring] scores={scores}")
     
     if scores and all(s == 0.0 for s in scores):
-        print("[test_scoring] WARNING: all scores are 0.0 - LLM may not output proper logits")
+        _log("[test_scoring] WARNING: all scores are 0.0 - LLM may not output proper logits")
     elif scores and any(s != 0.0 for s in scores):
-        print("[test_scoring] OK: scores have variance (LLM scoring works)")
+        _log("[test_scoring] OK: scores have variance (LLM scoring works)")
     
     return scores
 
@@ -200,13 +208,13 @@ def test_prediction_quick() -> str:
         "data": synthetic_data,
     }
     
-    print(f"[test_prediction_quick] query=(China, meet, ?, 2014-01-01)")
-    print(f"[test_prediction_quick] history_size={len(synthetic_data)}")
+    _log(f"[test_prediction_quick] query=(China, meet, ?, 2014-01-01)")
+    _log(f"[test_prediction_quick] history_size={len(synthetic_data)}")
     
     with _timer("test_prediction_quick"):
         pred = predict_next_object(query)
     
-    print(f"[test_prediction_quick] predicted={pred}")
+    _log(f"[test_prediction_quick] predicted={pred}")
     return pred
 
 
@@ -227,17 +235,17 @@ def test_prediction(sample_size: int = 500) -> str:
     
     data_dir = os.environ.get("TKG_DATA_DIR", DEFAULT_DATA_DIR)
     
-    print(f"[test_prediction] Loading data from {data_dir}...")
+    _log(f"[test_prediction] Loading data from {data_dir}...")
     valid_data = load_dataset(data_dir, splits=["valid"])
     train_data = load_dataset(data_dir, splits=["train"])
     
     e = valid_data[0]
     query = (e.subject, e.relation, "?", e.timestamp)
     
-    print(f"[test_prediction] query={query}")
-    print(f"[test_prediction] ground_truth={e.object}")
+    _log(f"[test_prediction] query={query}")
+    _log(f"[test_prediction] ground_truth={e.object}")
     
-    print(f"[test_prediction] Extracting entities...")
+    _log(f"[test_prediction] Extracting entities...")
     entities = extract_entities(train_data)
     total_entities = len(entities)
     
@@ -250,21 +258,21 @@ def test_prediction(sample_size: int = 500) -> str:
         if e.object not in sampled:
             sampled.append(e.object)
         entities = sorted(sampled)
-        print(f"[test_prediction] Sampled {len(entities)} entities (from {total_entities})")
+        _log(f"[test_prediction] Sampled {len(entities)} entities (from {total_entities})")
     
-    print(f"[test_prediction] Clustering {len(entities)} entities...")
+    _log(f"[test_prediction] Clustering {len(entities)} entities...")
     with _timer("clustering"):
         cluster_result = cluster_entities(entities)
     
     clear_gpu_memory()
     
-    print(f"[test_prediction] Running prediction...")
+    _log(f"[test_prediction] Running prediction...")
     with _timer("prediction"):
         pred = predict_next_object(query)
     
-    print(f"[test_prediction] predicted={pred}")
-    print(f"[test_prediction] ground_truth={e.object}")
-    print(f"[test_prediction] correct={pred == e.object}")
+    _log(f"[test_prediction] predicted={pred}")
+    _log(f"[test_prediction] ground_truth={e.object}")
+    _log(f"[test_prediction] correct={pred == e.object}")
     
     clear_gpu_memory()
     
@@ -273,34 +281,34 @@ def test_prediction(sample_size: int = 500) -> str:
 
 def test_quick() -> None:
     """Run quick tests (1-3 + 4a). Total time: ~30-60s."""
-    print("\n" + "=" * 50)
-    print("TEST 1: Basic LLM call")
-    print("=" * 50)
+    _log("\n" + "=" * 50)
+    _log("TEST 1: Basic LLM call")
+    _log("=" * 50)
     test_llm()
     clear_gpu_memory()
     
-    print("\n" + "=" * 50)
-    print("TEST 2: Analogical reasoning (paper §3.3)")
-    print("=" * 50)
+    _log("\n" + "=" * 50)
+    _log("TEST 2: Analogical reasoning (paper §3.3)")
+    _log("=" * 50)
     test_analogical(max_chars=3000)
     clear_gpu_memory()
     
-    print("\n" + "=" * 50)
-    print("TEST 3: LLM scoring (paper §3.2 PDC)")
-    print("=" * 50)
+    _log("\n" + "=" * 50)
+    _log("TEST 3: LLM scoring (paper §3.2 PDC)")
+    _log("=" * 50)
     test_scoring(n=5)
     clear_gpu_memory()
     
-    print("\n" + "=" * 50)
-    print("TEST 4: Quick prediction (synthetic data)")
-    print("=" * 50)
+    _log("\n" + "=" * 50)
+    _log("TEST 4: Quick prediction (synthetic data)")
+    _log("=" * 50)
     test_prediction_quick()
     clear_gpu_memory()
     
-    print("\n" + "=" * 50)
-    print("QUICK TESTS COMPLETED")
-    print("=" * 50)
-    print("\nTo run full prediction with clustering, use: test_prediction()")
+    _log("\n" + "=" * 50)
+    _log("QUICK TESTS COMPLETED")
+    _log("=" * 50)
+    _log("\nTo run full prediction with clustering, use: test_prediction()")
 
 
 def test_all() -> None:
@@ -309,16 +317,16 @@ def test_all() -> None:
     
     clear_gpu_memory()
     
-    print("\n" + "=" * 50)
-    print("TEST 5: Full prediction (real data + clustering)")
-    print("=" * 50)
+    _log("\n" + "=" * 50)
+    _log("TEST 5: Full prediction (real data + clustering)")
+    _log("=" * 50)
     test_prediction()
     
     clear_gpu_memory()
     
-    print("\n" + "=" * 50)
-    print("ALL TESTS COMPLETED")
-    print("=" * 50)
+    _log("\n" + "=" * 50)
+    _log("ALL TESTS COMPLETED")
+    _log("=" * 50)
 
 
 def debug_scoring_raw(n: int = 3) -> str:
@@ -345,9 +353,9 @@ def debug_scoring_raw(n: int = 3) -> str:
         n=len(hist),
     )
     
-    print("=== PROMPT (first 500 chars) ===")
-    print(prompt[:500])
-    print("\n=== RAW LLM OUTPUT ===")
+    _log("=== PROMPT (first 500 chars) ===")
+    _log(prompt[:500])
+    _log("\n=== RAW LLM OUTPUT ===")
     raw = call_llm(prompt)
-    print(raw)
+    _log(raw)
     return raw

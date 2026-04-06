@@ -204,11 +204,19 @@ def _env_truthy(name: str, default: bool = False) -> bool:
     return v in ("1", "true", "yes", "on")
 
 
+def _log(msg: str) -> None:
+    """Print with flush for real-time output in Colab."""
+    print(msg, flush=True)
+
+
 def _load_huggingface_model(model_id: str) -> None:
     """Load model + tokenizer once (4-bit by default for Colab T4)."""
     global _hf_model, _hf_tokenizer
 
     import torch
+    
+    _log(f"[llm] Loading model: {model_id}")
+    
     try:
         from transformers import AutoModelForCausalLM, AutoTokenizer
     except Exception as exc:
@@ -231,6 +239,7 @@ def _load_huggingface_model(model_id: str) -> None:
     trust_remote = _env_truthy("HF_TRUST_REMOTE_CODE", False)
     load_4bit = _env_truthy("HF_LOAD_IN_4BIT", True)
 
+    _log(f"[llm] Loading tokenizer...")
     tokenizer = AutoTokenizer.from_pretrained(
         model_id,
         token=token,
@@ -239,6 +248,7 @@ def _load_huggingface_model(model_id: str) -> None:
     if tokenizer.pad_token_id is None and tokenizer.eos_token_id is not None:
         tokenizer.pad_token = tokenizer.eos_token
 
+    _log(f"[llm] Loading weights (4bit={load_4bit})...")
     model_kwargs: dict[str, Any] = dict(
         device_map="auto",
         token=token,
@@ -261,6 +271,7 @@ def _load_huggingface_model(model_id: str) -> None:
     _hf_drop_fixed_max_length(model)
     _hf_model = model
     _hf_tokenizer = tokenizer
+    _log(f"[llm] Model loaded successfully")
 
 
 def _call_huggingface(prompt: str) -> str:
@@ -337,6 +348,10 @@ def _call_huggingface(prompt: str) -> str:
     if attention_mask is not None:
         attention_mask = attention_mask.to(device)
 
+    verbose = _env_truthy("LLM_VERBOSE", False)
+    if verbose:
+        _log(f"[llm] Generating (input={input_ids.shape[1]} tokens, max_new={max_new})...")
+
     do_sample = _env_truthy("HF_DO_SAMPLE", False)
     if attention_mask is not None:
         gen_in = dict(input_ids=input_ids, attention_mask=attention_mask)
@@ -361,7 +376,12 @@ def _call_huggingface(prompt: str) -> str:
         out = model.generate(**gen_in, **gen_kwargs)
 
     new_tokens = out[0, input_ids.shape[1] :]
-    return tokenizer.decode(new_tokens, skip_special_tokens=True)
+    result = tokenizer.decode(new_tokens, skip_special_tokens=True)
+    
+    if verbose:
+        _log(f"[llm] Generated {len(new_tokens)} tokens")
+    
+    return result
 
 
 # ---------------------------------------------------------------------------
