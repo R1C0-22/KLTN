@@ -89,6 +89,8 @@ def setup(
     os.environ["HF_MAX_NEW_TOKENS"] = str(max_tokens)
     os.environ["TKG_DATA_DIR"] = os.path.join(REPO_ROOT, data_dir)
     os.environ["LLM_SCORE_PARSE_FALLBACK"] = "1"
+    os.environ.setdefault("HF_SCORE_MAX_NEW_TOKENS", "256")
+    os.environ.setdefault("LLM_SCORE_CHUNK_SIZE", "24")
     os.environ["LLM_VERBOSE"] = "1" if verbose else "0"
     
     os.environ["SHORT_TERM_L"] = str(short_term_l)
@@ -218,7 +220,7 @@ def test_prediction_quick() -> str:
     return pred
 
 
-def test_prediction(sample_size: int = 500) -> str:
+def test_prediction(sample_size: int = 500, use_second_order: bool = False) -> str:
     """Test 4b: Full prediction with real data (includes clustering).
     
     WARNING: This is slow (~2-5 min) because it:
@@ -228,9 +230,10 @@ def test_prediction(sample_size: int = 500) -> str:
     
     Args:
         sample_size: Max entities for clustering (reduces time and memory)
+        use_second_order: If True, use O²q candidate set (paper Table 2). Helps when GT ∉ Oq.
     """
     from preprocessing import load_dataset
-    from inference.final_prediction import predict_next_object
+    from inference.final_prediction import predict_next_object, get_prediction_context
     from clustering.entity_cluster import cluster_entities, extract_entities
     
     data_dir = os.environ.get("TKG_DATA_DIR", DEFAULT_DATA_DIR)
@@ -265,10 +268,23 @@ def test_prediction(sample_size: int = 500) -> str:
         cluster_result = cluster_entities(entities)
     
     clear_gpu_memory()
+
+    ctx = get_prediction_context(query, cluster_result, use_second_order)
+    gt_norm = e.object.strip()
+    in_oq = gt_norm in {c.strip() for c in ctx.candidate_set}
+    _log(
+        f"[test_prediction] |Oq|={len(ctx.candidate_set)} "
+        f"ground_truth_in_candidate_set={in_oq}"
+    )
+    if not in_oq:
+        _log(
+            "[test_prediction] NOTE: ground truth not in Oq — Hit@1 impossible; "
+            "try test_prediction(..., use_second_order=True) or lower MIN_HISTORY_CONTEXTS."
+        )
     
     _log(f"[test_prediction] Running prediction...")
     with _timer("prediction"):
-        pred = predict_next_object(query)
+        pred = predict_next_object(query, cluster_result, use_second_order)
     
     _log(f"[test_prediction] predicted={pred}")
     _log(f"[test_prediction] ground_truth={e.object}")

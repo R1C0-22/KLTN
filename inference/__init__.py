@@ -3,6 +3,7 @@ from .final_prediction import (
     predict_next_object_with_probs,
     predict_batch,
     PredictionResult,
+    get_prediction_context,
 )
 
 __all__ = [
@@ -10,4 +11,5 @@ __all__ = [
     "predict_next_object_with_probs",
     "predict_batch",
     "PredictionResult",
+    "get_prediction_context",
 ]

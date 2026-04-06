@@ -331,17 +331,25 @@ def _call_huggingface(prompt: str) -> str:
     if verbose:
         _log(f"[llm] Generating (input={input_ids.shape[1]} tokens, max_new={max_new})...")
 
-    # Generate
-    gen_kwargs = {
-        "max_new_tokens": max_new,
-        "do_sample": False,
-        "pad_token_id": tokenizer.pad_token_id,
-        "use_cache": True,
-    }
+    # Explicit GenerationConfig avoids warnings from stale model.generation_config
+    # (temperature/top_p) when do_sample=False.
+    from transformers import GenerationConfig
+
+    gen_cfg = GenerationConfig(
+        max_new_tokens=max_new,
+        do_sample=False,
+        pad_token_id=tokenizer.pad_token_id,
+        eos_token_id=getattr(tokenizer, "eos_token_id", None),
+    )
 
     try:
         with torch.no_grad():
-            out = model.generate(input_ids, attention_mask=attention_mask, **gen_kwargs)
+            out = model.generate(
+                input_ids,
+                attention_mask=attention_mask,
+                generation_config=gen_cfg,
+                use_cache=True,
+            )
         
         new_tokens = out[0, input_ids.shape[1]:]
         result = tokenizer.decode(new_tokens, skip_special_tokens=True)

@@ -33,9 +33,12 @@ setup("llama")  # or "qwen"
 test_quick()
 ```
 
-### Cell 3: Full Test (~3-5 min, optional)
+### Cell 3: Full Test (slower; logs whether ground truth is in candidate set Oq)
 ```python
 from colab_setup import test_prediction
+# If you see ground_truth_in_candidate_set=False, Hit@1 cannot match; try:
+# test_prediction(use_second_order=True)
+# or: os.environ["MIN_HISTORY_CONTEXTS"] = "0" before setup()
 test_prediction()
 ```
 
@@ -73,6 +76,9 @@ debug_scoring_raw(n=3)  # See raw LLM output for scoring
 | `Could not infer dtype` | `git pull` + restart runtime |
 | Test 4 hangs at "Batches" | Use `test_prediction_quick()` or wait for clustering |
 | `CUDA out of memory` | Use `setup("llama", load_4bit=True)` (default now) |
+| Prediction ≠ ground truth but `ground_truth_in_candidate_set=False` | Expected: expand candidates with `test_prediction(use_second_order=True)` or lower `MIN_HISTORY_CONTEXTS` |
+| `temperature` / `top_p` ignored warnings | Fixed in `llm/unified.py` via explicit `GenerationConfig`; `git pull` |
+| Very slow PDC scoring | Defaults: `HF_SCORE_MAX_NEW_TOKENS=256`, `LLM_SCORE_CHUNK_SIZE=24` (set in `setup()`) |
 
 ---
 

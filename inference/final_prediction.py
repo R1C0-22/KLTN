@@ -165,7 +165,10 @@ def _prepare_prediction_context(
 
     s, r, o, t = event_fields(query_event)
     sq, rq = s.strip(), r.strip()
-    
+
+    if _env_truthy("USE_SECOND_ORDER_CANDIDATES", False):
+        use_second_order_candidates = True
+
     data = _load_history_data(query_event)
     
     if cluster_result is None:
@@ -245,6 +248,17 @@ def _prepare_prediction_context(
     return _PredictionContext(
         candidate_set=candidate_set,
         final_prompt=final_prompt,
+    )
+
+
+def get_prediction_context(
+    query_event: Any,
+    cluster_result=None,
+    use_second_order_candidates: bool = False,
+) -> _PredictionContext:
+    """Return prompts and candidate list without running the LLM (for debugging / metrics)."""
+    return _prepare_prediction_context(
+        query_event, cluster_result, use_second_order_candidates
     )
 
 

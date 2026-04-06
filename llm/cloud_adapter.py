@@ -47,8 +47,8 @@ from .unified import call_llm, call_llm_logprobs
 def _min_score_max_new_tokens(n_events: int) -> int:
     """Lower bound on new tokens so a JSON array of n floats can finish (closing `]`)."""
     n = max(1, int(n_events))
-    # JSON floats are verbose ("-0.123, "); ~14 chars each is a safe budget; cap for huge chunks.
-    return max(256, min(4096, 14 * n + 64))
+    # Tight JSON array budget (~10 chars/float + commas); avoids 512-token generations per chunk.
+    return max(64, min(2048, 10 * n + 48))
 
 
 def _effective_score_max_new_tokens(n_events: int) -> int:
