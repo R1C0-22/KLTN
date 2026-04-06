@@ -5,95 +5,85 @@
 ### Cell 1: Clone and Install
 ```python
 # Mount Drive (optional - cache HF models)
-from google.colab import drive
+from google.colab import drive, userdata
 drive.mount('/content/drive')
 
 import os
 os.environ["HF_HOME"] = "/content/drive/MyDrive/hf_cache"
+os.environ["HF_TOKEN"] = userdata.get("HF_TOKEN")  # for gated Llama
 
-# Clone repo
+# Clone repo + copy data
 !cd /content && rm -rf KLTN && git clone https://github.com/R1C0-22/KLTN.git
+!cp -r /content/drive/MyDrive/data /content/KLTN/  # if data on Drive
 
-# Install dependencies (DO NOT pin numpy version!)
-!pip install -q transformers>=4.41.0 accelerate bitsandbytes sentence-transformers scikit-learn
+# Install dependencies (DO NOT pin numpy!)
+!pip install -q transformers accelerate bitsandbytes sentence-transformers scikit-learn
 ```
 
 **After this cell: Runtime → Restart session**
 
-### Cell 2: Setup Environment
+### Cell 2: Setup and Test
 ```python
 import os, sys
 os.chdir("/content/KLTN")
 sys.path.insert(0, "/content/KLTN")
 
-from colab_setup import setup_env, test_llm
+from colab_setup import setup, test_all
 
-# Choose model: "qwen" or "llama"
-setup_env(model="qwen", load_4bit=False, max_tokens=200)
-
-# Test LLM
-test_llm("Say hello in one sentence.")
+setup("llama")  # or "qwen"
+test_all()
 ```
 
-### Cell 3: Run Paper Tests
+---
+
+## Individual Tests
+
 ```python
-from colab_setup import test_analogical, test_scoring, test_prediction
+from colab_setup import test_llm, test_analogical, test_scoring, test_prediction
 
-# Analogical reasoning (paper §3.3)
-test_analogical()
+test_llm()          # Basic LLM call
+test_analogical()   # Analogical reasoning (paper §3.3)
+test_scoring(n=5)   # Long-term scoring (paper §3.2)
+test_prediction()   # End-to-end prediction
+```
 
-# Long-term scoring (paper §3.2)
-test_scoring(n_events=5)
+---
 
-# End-to-end prediction
-test_prediction(split="valid", idx=0)
+## Debug Scoring
+```python
+from colab_setup import debug_scoring_raw
+debug_scoring_raw(n=3)  # See raw LLM output for scoring prompt
 ```
 
 ---
 
 ## Common Errors
 
-### `numpy.dtype size changed, may indicate binary incompatibility`
-**Cause**: You pinned `numpy<2.0` but Colab packages need `numpy>=2.0`.
-
-**Fix**: 
-1. Do NOT install with `numpy>=1.26,<2.0`
-2. Just run: `pip install -q transformers accelerate bitsandbytes sentence-transformers scikit-learn`
-3. **Runtime → Restart session**
-
-### `Unsupported LLM_PROVIDER='hf'`
-**Cause**: Old code version on Colab.
-
-**Fix**: `git pull` and restart runtime.
-
-### `OPENAI_API_KEY is not set`
-**Cause**: Using cloud backend but no API key.
-
-**Fix**: Set `os.environ["LLM_PROVIDER"] = "hf"` for local HF models.
+| Error | Cause | Fix |
+|-------|-------|-----|
+| `numpy.dtype size changed` | Pinned numpy<2.0 | Don't pin numpy, restart runtime |
+| `Unsupported LLM_PROVIDER='hf'` | Old code | `git pull` + restart runtime |
+| `OPENAI_API_KEY is not set` | Wrong provider | Set `LLM_PROVIDER=hf` |
+| `Could not infer dtype` | Old tokenizer code | `git pull` + restart runtime |
 
 ---
 
 ## Model Options
 
-| Model | HF ID | Notes |
-|-------|-------|-------|
+| Model | ID | Notes |
+|-------|-----|-------|
 | Qwen 2.5 7B | `Qwen/Qwen2.5-7B-Instruct` | No token needed |
-| Llama 3 8B | `meta-llama/Meta-Llama-3-8B-Instruct` | Needs HF token (gated) |
-
-For Llama, set token:
-```python
-from google.colab import userdata
-os.environ["HF_TOKEN"] = userdata.get("HF_TOKEN")
-```
+| Llama 3 8B | `meta-llama/Meta-Llama-3-8B-Instruct` | Needs HF token |
 
 ---
 
 ## Environment Variables
 
-```python
-os.environ["LLM_PROVIDER"] = "hf"                    # Use HuggingFace local
-os.environ["HF_MODEL_ID"] = "Qwen/Qwen2.5-7B-Instruct"
-os.environ["HF_LOAD_IN_4BIT"] = "0"                  # "1" for 4-bit quantization
-os.environ["HF_MAX_NEW_TOKENS"] = "200"
-os.environ["TKG_DATA_DIR"] = "data/ICEWS05-15"
-```
+| Variable | Description | Example |
+|----------|-------------|---------|
+| `LLM_PROVIDER` | Backend | `hf` |
+| `HF_MODEL_ID` | Model ID | `Qwen/Qwen2.5-7B-Instruct` |
+| `HF_LOAD_IN_4BIT` | Quantization | `0` (A100) or `1` (T4) |
+| `HF_MAX_NEW_TOKENS` | Max output | `512` |
+| `TKG_DATA_DIR` | Dataset path | `data/ICEWS05-15` |
+| `LLM_SCORE_PARSE_FALLBACK` | Fallback scoring | `1` |
