@@ -251,7 +251,7 @@ def test_quick() -> None:
     print("\n" + "=" * 50)
     print("TEST 2: Analogical reasoning (paper §3.3)")
     print("=" * 50)
-    test_analogical(max_chars=800)
+    test_analogical(max_chars=3000)
     
     print("\n" + "=" * 50)
     print("TEST 3: LLM scoring (paper §3.2 PDC)")
