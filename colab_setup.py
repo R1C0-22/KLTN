@@ -64,6 +64,7 @@ def setup(
     os.environ["HF_LOAD_IN_4BIT"] = "1" if load_4bit else "0"
     os.environ["HF_MAX_NEW_TOKENS"] = str(max_tokens)
     os.environ["TKG_DATA_DIR"] = os.path.join(REPO_ROOT, data_dir)
+    os.environ["LLM_SCORE_PARSE_FALLBACK"] = "1"
     
     print(f"[setup] model={model_id}")
     print(f"[setup] 4bit={load_4bit}, max_tokens={max_tokens}")
@@ -93,8 +94,12 @@ def test_llm() -> str:
     return result
 
 
-def test_analogical() -> str:
-    """Test 2: Analogical reasoning generation (paper §3.3)."""
+def test_analogical(max_chars: int = 0) -> str:
+    """Test 2: Analogical reasoning generation (paper §3.3).
+    
+    Args:
+        max_chars: Max chars to display (0 = show all)
+    """
     from analogical import generate_analogical_reasoning
     
     event = ("China", "meet", "?", "2014-01-01")
@@ -112,7 +117,10 @@ def test_analogical() -> str:
     
     print(f"[test_analogical] output ({len(result)} chars):")
     print("-" * 40)
-    print(result[:600] + ("..." if len(result) > 600 else ""))
+    if max_chars > 0 and len(result) > max_chars:
+        print(result[:max_chars] + "...")
+    else:
+        print(result)
     print("-" * 40)
     return result
 
@@ -136,6 +144,8 @@ def test_scoring(n: int = 5) -> list[float]:
     
     if scores and all(s == 0.0 for s in scores):
         print("[test_scoring] WARNING: all scores are 0.0 - LLM may not output proper logits")
+    elif scores and any(s != 0.0 for s in scores):
+        print("[test_scoring] OK: scores have variance (LLM scoring works)")
     
     return scores
 
@@ -241,7 +251,7 @@ def test_quick() -> None:
     print("\n" + "=" * 50)
     print("TEST 2: Analogical reasoning (paper §3.3)")
     print("=" * 50)
-    test_analogical()
+    test_analogical(max_chars=800)
     
     print("\n" + "=" * 50)
     print("TEST 3: LLM scoring (paper §3.2 PDC)")

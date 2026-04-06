@@ -22,10 +22,8 @@ def event_fields(event: Any) -> tuple[str, str, str, str]:
 
     Supported shapes:
       - Quadruple-like objects with attributes: subject, relation, object, timestamp
+      - dict with keys: subject/s, relation/r, object/o, timestamp/t/time
       - 4-tuples / 4-lists: (s, r, o, t)
-
-    This helper is intentionally strict and *not* aware of dict-based
-    query_event structures used in the inference module.
     """
     if (
         hasattr(event, "subject")
@@ -40,13 +38,21 @@ def event_fields(event: Any) -> tuple[str, str, str, str]:
             str(event.timestamp),
         )
 
+    if isinstance(event, dict):
+        s = event.get("subject") or event.get("s")
+        r = event.get("relation") or event.get("r")
+        o = event.get("object") or event.get("o")
+        t = event.get("timestamp") or event.get("t") or event.get("time")
+        if s is not None and r is not None and o is not None and t is not None:
+            return str(s), str(r), str(o), str(t)
+
     if isinstance(event, (tuple, list)) and len(event) >= 4:
         s, r, o, t = event[0], event[1], event[2], event[3]
         return str(s), str(r), str(o), str(t)
 
     raise TypeError(
-        "Unsupported event type. Expected a Quadruple-like object with "
-        "(subject, relation, object, timestamp) or a 4-tuple/list (s, r, o, t)."
+        "Unsupported event type. Expected a Quadruple-like object, "
+        "dict with s/r/o/t keys, or a 4-tuple/list (s, r, o, t)."
     )
 
 
