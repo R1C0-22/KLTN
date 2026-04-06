@@ -65,6 +65,7 @@ debug_scoring_raw(n=3)  # See raw LLM output for scoring prompt
 | `Unsupported LLM_PROVIDER='hf'` | Old code | `git pull` + restart runtime |
 | `OPENAI_API_KEY is not set` | Wrong provider | Set `LLM_PROVIDER=hf` |
 | `Could not infer dtype` | Old tokenizer code | `git pull` + restart runtime |
+| `Expected at least N scores` | LLM truncated output | Auto-fixed with fallback padding |
 
 ---
 

@@ -141,21 +141,30 @@ def score_fn(prompt: str, events: Sequence[Any]) -> List[float]:
 
     if not isinstance(raw, str):
         raw = str(raw)
+    use_fallback = os.environ.get("LLM_SCORE_PARSE_FALLBACK", "").strip().lower() in (
+        "1", "true", "yes", "on"
+    )
+
     try:
         scores = _extract_first_json_array(raw.strip())
     except ValueError:
-        fb = os.environ.get("LLM_SCORE_PARSE_FALLBACK", "").strip().lower()
-        if fb in ("1", "true", "yes", "on"):
+        if use_fallback:
             return _fallback_scores(prompt, events)
         raise
 
     expected = len(events)
     if len(scores) < expected:
-        raise ValueError(
-            f"Expected at least {expected} scores from model, got {len(scores)}."
-        )
-    if len(scores) > expected:
+        if use_fallback:
+            # Pad missing scores with fallback values for remaining events
+            missing = _fallback_scores(prompt, list(events)[len(scores):])
+            scores.extend(missing)
+        else:
+            raise ValueError(
+                f"Expected at least {expected} scores from model, got {len(scores)}."
+            )
+    elif len(scores) > expected:
         scores = scores[:expected]
+
     return scores
 
 
