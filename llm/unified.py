@@ -274,13 +274,27 @@ def _load_huggingface_model(model_id: str) -> None:
     _log(f"[llm] Model loaded successfully")
 
 
+def _clear_gpu_cache() -> None:
+    """Clear GPU cache to prevent OOM during repeated generations."""
+    import gc
+    gc.collect()
+    try:
+        import torch
+        if torch.cuda.is_available():
+            torch.cuda.empty_cache()
+    except Exception:
+        pass
+
+
 def _call_huggingface(prompt: str) -> str:
+    """Generate text using local HuggingFace model with proper memory management."""
     global _hf_model, _hf_tokenizer
+    import gc
 
     model_id = os.environ.get("HF_MODEL_ID", "").strip()
     if not model_id:
         raise EnvironmentError(
-            "HF_MODEL_ID is not set. Examples (AnRe-style families): "
+            "HF_MODEL_ID is not set. Examples: "
             "meta-llama/Meta-Llama-3-8B-Instruct, Qwen/Qwen2.5-7B-Instruct"
         )
 
@@ -291,95 +305,58 @@ def _call_huggingface(prompt: str) -> str:
 
     model = _hf_model
     tokenizer = _hf_tokenizer
-    messages = [{"role": "user", "content": prompt}]
+    verbose = _env_truthy("LLM_VERBOSE", False)
 
-    max_new = int(os.environ.get("HF_MAX_NEW_TOKENS", "512"))
+    # Config
+    max_new = int(os.environ.get("HF_MAX_NEW_TOKENS", "256"))
     cfg = model.config
-    model_ctx = getattr(cfg, "max_position_embeddings", None) or getattr(
-        cfg, "n_positions", None
-    )
-    if model_ctx is None:
-        model_ctx = int(os.environ.get("HF_DEFAULT_MODEL_CONTEXT", "8192"))
+    model_ctx = getattr(cfg, "max_position_embeddings", None) or getattr(cfg, "n_positions", 8192)
     input_cap_override = os.environ.get("HF_MAX_INPUT_TOKENS", "").strip()
-    if input_cap_override:
-        input_cap = max(64, int(input_cap_override))
-    else:
-        input_cap = max(256, int(model_ctx) - max_new - 64)
+    input_cap = int(input_cap_override) if input_cap_override else max(256, model_ctx - max_new - 64)
 
-    attention_mask: Any | None = None
+    # Tokenize
+    messages = [{"role": "user", "content": prompt}]
     if getattr(tokenizer, "chat_template", None):
-        # Some transformer/tokenizer versions return non-tensor objects from
-        # `apply_chat_template(..., return_tensors="pt")`. To stay robust,
-        # first materialize the prompt text, then re-tokenize with
-        # `tokenizer(prompt_text, return_tensors="pt")`.
-        prompt_text = tokenizer.apply_chat_template(
-            messages,
-            add_generation_prompt=True,
-            tokenize=False,
-        )
-        enc = tokenizer(
-            prompt_text,
-            return_tensors="pt",
-            padding=False,
-            truncation=True,
-            max_length=input_cap,
-        )
+        prompt_text = tokenizer.apply_chat_template(messages, add_generation_prompt=True, tokenize=False)
     else:
-        enc = tokenizer(
-            prompt,
-            return_tensors="pt",
-            padding=False,
-            truncation=True,
-            max_length=input_cap,
-        )
+        prompt_text = prompt
 
-    input_ids = enc["input_ids"]
-    attention_mask = enc.get("attention_mask")
-
-    # Defensive fallback: enforce a torch tensor of token ids.
-    if not torch.is_tensor(input_ids):
-        # tokenizers.Encoding / BatchEncoding might sneak in on edge versions.
-        if hasattr(input_ids, "input_ids"):
-            input_ids = input_ids.input_ids
-        if not torch.is_tensor(input_ids):
-            input_ids = torch.tensor(input_ids, dtype=torch.long)
+    enc = tokenizer(prompt_text, return_tensors="pt", truncation=True, max_length=input_cap)
     device = next(model.parameters()).device
-    input_ids = input_ids.to(device)
+    input_ids = enc["input_ids"].to(device)
+    attention_mask = enc.get("attention_mask")
     if attention_mask is not None:
         attention_mask = attention_mask.to(device)
 
-    verbose = _env_truthy("LLM_VERBOSE", False)
     if verbose:
         _log(f"[llm] Generating (input={input_ids.shape[1]} tokens, max_new={max_new})...")
 
-    do_sample = _env_truthy("HF_DO_SAMPLE", False)
-    if attention_mask is not None:
-        gen_in = dict(input_ids=input_ids, attention_mask=attention_mask)
-    else:
-        gen_in = dict(input_ids=input_ids)
+    # Generate
+    gen_kwargs = {
+        "max_new_tokens": max_new,
+        "do_sample": False,
+        "pad_token_id": tokenizer.pad_token_id,
+        "use_cache": True,
+    }
 
-    # max_new_tokens is required (open-ended decode). max_length on the model was
-    # cleared in _hf_drop_fixed_max_length to avoid HF warnings.
-    gen_kwargs: dict[str, Any] = dict(
-        max_new_tokens=max_new,
-        do_sample=do_sample,
-        pad_token_id=tokenizer.pad_token_id,
-    )
-    if do_sample:
-        gen_kwargs["temperature"] = float(os.environ.get("HF_TEMPERATURE", "0.2"))
-    else:
-        # Greedy: neutral sampling kwargs silence "temperature/top_p not valid" on some HF versions.
-        gen_kwargs["temperature"] = 1.0
-        gen_kwargs["top_p"] = 1.0
-
-    with torch.no_grad():
-        out = model.generate(**gen_in, **gen_kwargs)
-
-    new_tokens = out[0, input_ids.shape[1] :]
-    result = tokenizer.decode(new_tokens, skip_special_tokens=True)
-    
-    if verbose:
-        _log(f"[llm] Generated {len(new_tokens)} tokens")
+    try:
+        with torch.no_grad():
+            out = model.generate(input_ids, attention_mask=attention_mask, **gen_kwargs)
+        
+        new_tokens = out[0, input_ids.shape[1]:]
+        result = tokenizer.decode(new_tokens, skip_special_tokens=True)
+        
+        if verbose:
+            _log(f"[llm] Generated {len(new_tokens)} tokens")
+    finally:
+        # Clean up tensors and GPU cache to prevent OOM
+        del input_ids, attention_mask, enc
+        if 'out' in dir():
+            del out
+        if 'new_tokens' in dir():
+            del new_tokens
+        gc.collect()
+        _clear_gpu_cache()
     
     return result
 
@@ -540,11 +517,9 @@ def _logprobs_groq(prompt: str, candidate_labels: list[str]) -> list[float]:
 
 
 def _logprobs_huggingface(prompt: str, candidate_labels: list[str]) -> list[float]:
-    """Get logprobs from HuggingFace local model using forward pass.
-    
-    This is the most accurate implementation matching the paper's methodology.
-    """
+    """Get logprobs from HuggingFace model using forward pass (paper §3.3, §2.2)."""
     global _hf_model, _hf_tokenizer
+    import gc
 
     model_id = os.environ.get("HF_MODEL_ID", "").strip()
     if not model_id:
@@ -558,67 +533,42 @@ def _logprobs_huggingface(prompt: str, candidate_labels: list[str]) -> list[floa
     model = _hf_model
     tokenizer = _hf_tokenizer
     
-    messages = [{"role": "user", "content": prompt}]
-    
+    # Config
     cfg = model.config
-    model_ctx = getattr(cfg, "max_position_embeddings", None) or getattr(
-        cfg, "n_positions", None
-    )
-    if model_ctx is None:
-        model_ctx = int(os.environ.get("HF_DEFAULT_MODEL_CONTEXT", "8192"))
-    input_cap = max(256, int(model_ctx) - 64)
+    model_ctx = getattr(cfg, "max_position_embeddings", None) or getattr(cfg, "n_positions", 8192)
+    input_cap = max(256, model_ctx - 64)
 
+    # Tokenize
+    messages = [{"role": "user", "content": prompt}]
     if getattr(tokenizer, "chat_template", None):
-        prompt_text = tokenizer.apply_chat_template(
-            messages,
-            add_generation_prompt=True,
-            tokenize=False,
-        )
-        enc = tokenizer(
-            prompt_text,
-            return_tensors="pt",
-            padding=False,
-            truncation=True,
-            max_length=input_cap,
-        )
+        prompt_text = tokenizer.apply_chat_template(messages, add_generation_prompt=True, tokenize=False)
     else:
-        enc = tokenizer(
-            prompt,
-            return_tensors="pt",
-            padding=False,
-            truncation=True,
-            max_length=input_cap,
-        )
+        prompt_text = prompt
 
-    input_ids = enc["input_ids"]
-    attention_mask = enc.get("attention_mask")
-
-    if not torch.is_tensor(input_ids):
-        if hasattr(input_ids, "input_ids"):
-            input_ids = input_ids.input_ids
-        if not torch.is_tensor(input_ids):
-            input_ids = torch.tensor(input_ids, dtype=torch.long)
-    
+    enc = tokenizer(prompt_text, return_tensors="pt", truncation=True, max_length=input_cap)
     device = next(model.parameters()).device
-    input_ids = input_ids.to(device)
+    input_ids = enc["input_ids"].to(device)
+    attention_mask = enc.get("attention_mask")
     if attention_mask is not None:
         attention_mask = attention_mask.to(device)
 
-    # Get logits for the next token position
-    with torch.no_grad():
-        outputs = model(input_ids, attention_mask=attention_mask)
-        next_token_logits = outputs.logits[0, -1, :]
-    
-    # Extract logprobs for each candidate label token
-    logprob_scores = []
-    for label in candidate_labels:
-        label_tokens = tokenizer.encode(label, add_special_tokens=False)
-        if label_tokens:
-            first_token_id = label_tokens[0]
-            logprob = next_token_logits[first_token_id].item()
-        else:
-            logprob = -100.0
-        logprob_scores.append(logprob)
+    try:
+        with torch.no_grad():
+            outputs = model(input_ids, attention_mask=attention_mask)
+            next_token_logits = outputs.logits[0, -1, :].cpu()
+        
+        # Extract logprobs for each candidate label
+        logprob_scores = []
+        for label in candidate_labels:
+            label_tokens = tokenizer.encode(label, add_special_tokens=False)
+            if label_tokens:
+                logprob_scores.append(next_token_logits[label_tokens[0]].item())
+            else:
+                logprob_scores.append(-100.0)
+    finally:
+        del input_ids, attention_mask, enc, outputs, next_token_logits
+        gc.collect()
+        _clear_gpu_cache()
     
     return logprob_scores
 

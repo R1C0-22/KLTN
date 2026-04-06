@@ -64,10 +64,10 @@ def clear_gpu_memory() -> None:
 def setup(
     model: str = "qwen",
     load_4bit: bool = True,
-    max_tokens: int = 256,
+    max_tokens: int = 200,
     data_dir: str = DEFAULT_DATA_DIR,
-    short_term_l: int = 10,
-    history_length: int = 50,
+    short_term_l: int = 5,
+    history_length: int = 20,
     verbose: bool = True,
 ) -> None:
     """Configure environment for HF local LLM inference.
@@ -75,11 +75,11 @@ def setup(
     Args:
         model: "qwen", "llama", or full HF model ID
         load_4bit: Use 4-bit quantization (default True to prevent OOM)
-        max_tokens: Max new tokens for generation
+        max_tokens: Max new tokens for generation (reduced from 256 to prevent OOM)
         data_dir: Dataset directory relative to repo root
-        short_term_l: Max short-term history events (paper default: 20)
-        history_length: Max total history length (paper default: 100)
-        verbose: Enable real-time logging (default True)
+        short_term_l: Max short-term history events (reduced for speed/memory)
+        history_length: Max total history length (reduced for speed/memory)
+        verbose: Enable real-time logging
     """
     model_id = MODELS.get(model.lower(), model)
     
@@ -94,7 +94,7 @@ def setup(
     os.environ["SHORT_TERM_L"] = str(short_term_l)
     os.environ["HISTORY_LENGTH_L"] = str(history_length)
     os.environ["NUM_ANALOGICAL_EXAMPLES"] = "1"
-    os.environ["MIN_HISTORY_CONTEXTS"] = "50"
+    os.environ["MIN_HISTORY_CONTEXTS"] = "20"
     
     clear_gpu_memory()
     
