@@ -1,4 +1,4 @@
-There is a question and some historical events. Please select the historical event that is most helpful in answering this question from these historical events and return the number before the event.
+Rate how helpful each historical event is for answering the question.
 
 Question:
 {query}
@@ -6,11 +6,11 @@ Question:
 Historical events:
 {history}
 
-Your choice is:
+Instructions:
+- Output ONLY a JSON array of exactly {n} numbers (one per event above).
+- Each number is a helpfulness score from 0.0 to 1.0.
+- 1.0 = very helpful, 0.0 = not helpful.
+- Spread the scores - do NOT give all zeros or all ones.
+- Example for 3 events: [0.8, 0.3, 0.6]
 
-IMPORTANT (for this codebase):
-- Output ONLY a JSON array of exactly {n} floats.
-- The i-th float corresponds to the i-th historical event in the order shown above.
-- Larger float means the historical event is more helpful for answering the question.
-- Do NOT output all zeros; even if uncertain, add small differences between values.
-- Output ONLY the JSON array. No extra text.
+Output ONLY the JSON array, nothing else:

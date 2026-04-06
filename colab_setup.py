@@ -74,20 +74,34 @@ def test_llm() -> str:
 
 
 def test_analogical() -> str:
-    """Test analogical reasoning generation."""
+    """Test analogical reasoning generation (paper §3.3).
+    
+    Requires at least 2 similar events: first n-1 become history,
+    last one is the similar event with known answer.
+    """
     from analogical import generate_analogical_reasoning
     
     event = ("China", "meet", "?", "2014-01-01")
-    similar = [("Russia", "meet", "Belarus", "2013-01-01")]
+    # Need 2+ events: [:-1] = history, [-1] = similar event with answer
+    similar = [
+        ("Russia", "consult", "Belarus", "2012-06-01"),
+        ("Russia", "meet", "Ukraine", "2012-12-01"),
+        ("Russia", "meet", "Belarus", "2013-01-01"),  # answer = Belarus
+    ]
     
     print(f"[test_analogical] event={event}")
+    print(f"[test_analogical] similar_events={len(similar)} (history={len(similar)-1})")
     result = generate_analogical_reasoning(event, similar)
-    print(f"[test_analogical] output[:200]: {result[:200]}")
+    print(f"[test_analogical] output[:300]: {result[:300]}")
     return result
 
 
-def test_scoring(n: int = 3) -> list[float]:
-    """Test LLM scoring for long-term filtering."""
+def test_scoring(n: int = 5) -> list[float]:
+    """Test LLM scoring for long-term filtering (paper §3.2 PDC).
+    
+    Note: scores [1.0, 0.0, ...] often means model picked "event #1" 
+    instead of outputting proper logits. This is acceptable with fallback.
+    """
     from preprocessing import load_dataset
     from long_term.long_term_filter import compute_scores_with_llm
     
@@ -95,9 +109,16 @@ def test_scoring(n: int = 3) -> list[float]:
     hist = load_dataset(data_dir, splits=["train"])[:n]
     query = (hist[0].subject, hist[0].relation, "?", hist[0].timestamp)
     
-    print(f"[test_scoring] query={query}, n_events={n}")
+    print(f"[test_scoring] query={query}")
+    print(f"[test_scoring] n_events={n}")
     scores = compute_scores_with_llm(hist, query)
     print(f"[test_scoring] scores={scores}")
+    
+    # Warn if scores look like index selection instead of logits
+    if scores and scores.count(0.0) >= len(scores) - 1:
+        print("[test_scoring] WARNING: scores look uniform - model may not output proper logits")
+        print("[test_scoring] This is handled by fallback, but quality may vary")
+    
     return scores
 
 
@@ -128,14 +149,14 @@ def test_all() -> None:
     test_llm()
     
     print("\n" + "="*50)
-    print("TEST 2: Analogical reasoning")
+    print("TEST 2: Analogical reasoning (paper §3.3)")
     print("="*50)
     test_analogical()
     
     print("\n" + "="*50)
-    print("TEST 3: LLM scoring")
+    print("TEST 3: LLM scoring (paper §3.2 PDC)")
     print("="*50)
-    test_scoring()
+    test_scoring(n=5)
     
     print("\n" + "="*50)
     print("TEST 4: End-to-end prediction")
