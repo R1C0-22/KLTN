@@ -31,11 +31,11 @@ from sentence_transformers import SentenceTransformer
 from sklearn.cluster import KMeans
 from sklearn.metrics import silhouette_score
 
+from common import DEFAULT_EMBED_MODEL
+
 warnings.filterwarnings("ignore", message=".*position_ids.*")
 
 logger = logging.getLogger(__name__)
-
-_DEFAULT_MODEL = "all-MiniLM-L6-v2"
 
 # Prefix gives the sentence-transformer semantic context so that bare
 # names like "Xi Jinping" get placed closer to "China" than to
@@ -95,7 +95,7 @@ class ClusterResult:
 def embed_entities(
     entity_list: Sequence[str],
     *,
-    model_name: str = _DEFAULT_MODEL,
+    model_name: str = DEFAULT_EMBED_MODEL,
     batch_size: int = 256,
     device: str | None = None,
     show_progress: bool = True,
@@ -291,7 +291,7 @@ def cluster_entities(
     entity_list: Sequence[str],
     *,
     embeddings: NDArray[np.float32] | None = None,
-    model_name: str = _DEFAULT_MODEL,
+    model_name: str = DEFAULT_EMBED_MODEL,
     k: int | None = None,
     k_min: int = 2,
     k_max: int | None = None,

@@ -20,7 +20,7 @@ from typing import Any, Sequence
 import numpy as np
 from sentence_transformers import SentenceTransformer
 
-from common import event_fields, parse_timestamp
+from common import DEFAULT_EMBED_MODEL, event_fields, parse_timestamp
 
 logger = logging.getLogger(__name__)
 
@@ -32,7 +32,7 @@ MIN_HISTORY_CONTEXTS = 300
 
 @dataclass
 class SimilarEventCandidate:
-    """A similar event candidate with its entity and history."""
+    """Similar event ei with dual-history chain Hai (§3.2) for analogical replay."""
     entity: str
     event: Any
     history: list[Any]
@@ -128,20 +128,24 @@ def rank_events_by_similarity(
     semantic similarity to q, and the query with the highest
     similarity is selected as the similar event ei."
     
+    Query and events are embedded as verbalized sentences (masked query for q).
+    
     Returns list of (event, similarity_score) sorted descending.
     """
     if not events:
         return []
     
     if model is None:
-        model = SentenceTransformer("all-MiniLM-L6-v2")
+        model = SentenceTransformer(DEFAULT_EMBED_MODEL)
     
+    from preprocessing import verbalize_event
+
     def event_to_text(ev: Any) -> str:
         s, r, o, t = event_fields(ev)
-        return f"{s} {r} {o}"
-    
-    qs, qr, qo, qt = event_fields(query_event)
-    query_text = f"{qs} {qr}"
+        return verbalize_event(s, r, o, t).strip()
+
+    qs, qr, _qo, qt = event_fields(query_event)
+    query_text = verbalize_event(qs, qr, "?", qt).strip()
     
     event_texts = [event_to_text(ev) for ev in events]
     all_texts = [query_text] + event_texts
@@ -167,17 +171,20 @@ def find_similar_events_from_cluster(
     top_a: int = 1,
     min_contexts: int = MIN_HISTORY_CONTEXTS,
     min_history_length: int = 100,
+    short_term_l: int = 20,
+    dual_history_target_L: int = 100,
+    dtf_alpha: float = 2.75,
     model: SentenceTransformer | None = None,
 ) -> list[SimilarEventCandidate]:
     """Find similar events from entities in the same cluster.
     
-    Paper Algorithm 1, lines 4-10 and §3.3:
-    For each si ∈ X (cluster) where si ≠ sq:
-      - Hi, ei ← CandiFilter(Hn, rq, si)
-      - Find similar event with same relation
-      - Rank by semantic similarity
-      - Filter out events where history length < L (§3.3)
-      - Return top 'a' candidates
+    Paper Algorithm 1, lines 4-10 and §3.2–3.3:
+    For each si ∈ X where si ≠ sq:
+      - Build Ei, filter ≥300 contexts, rank by similarity to q
+      - Select **one** ei per si (highest similarity among those that qualify)
+      - Hai = dual history (HS + HL) for (si, rq, ?, ti) per §3.2
+      - Skip if |Hai| < L (§3.3)
+    Globally keep the top_a candidates by similarity score.
     
     Parameters
     ----------
@@ -192,73 +199,94 @@ def find_similar_events_from_cluster(
     min_contexts : int
         Minimum history contexts required for filtering Ei (default 300)
     min_history_length : int
-        Minimum history length L for analogical examples (default 100).
-        Paper §3.3: "we filter out ei from Hi if its length is less than
-        the total length L"
+        Minimum combined dual-history length L (default 100). Paper §3.3.
+    short_term_l : int
+        Short-term chain length l (default 20). Paper §6.1.
+    dual_history_target_L : int
+        Target total history length L for dual extraction (default 100).
+    dtf_alpha : float
+        Dynamic threshold factor α (default 2.75). Paper §6.1.
     model : SentenceTransformer | None
-        Embedding model for similarity computation
+        Embedding model for similarity computation (default: BERT NLI, AnRe §3.1).
     
     Returns
     -------
     list[SimilarEventCandidate]
-        Top 'a' similar event candidates with their histories
+        Top 'a' similar event candidates with dual-history chains Hai.
     """
     from history import get_entity_history
-    
+    from long_term import combine_dual_history, extract_dual_history
+
     sq, rq, _, tq = event_fields(query_event)
     sq = sq.strip()
     rq = rq.strip().lower()
-    
+
     if model is None:
-        model = SentenceTransformer("all-MiniLM-L6-v2")
-    
+        model = SentenceTransformer(DEFAULT_EMBED_MODEL)
+
     all_candidates: list[tuple[Any, float, str, list[Any]]] = []
-    
+
     for si in cluster_entities:
         si = si.strip()
         if si == sq:
             continue
-        
+
         similar_events = get_similar_events_for_entity(si, rq, all_data, tq)
-        
+
         filtered_events = filter_events_by_history_requirement(
             similar_events, all_data, min_contexts
         )
-        
+
         if not filtered_events:
             continue
-        
+
         ranked = rank_events_by_similarity(filtered_events, query_event, model)
-        
+
+        chosen: tuple[Any, float, str, list[Any]] | None = None
         for ev, sim_score in ranked:
-            history = get_entity_history(si, all_data)
+            raw_history = get_entity_history(si, all_data)
             ev_t = event_fields(ev)[3]
             ev_dt = _parse_timestamp(ev_t)
             if ev_dt is not None:
-                history = [
-                    h for h in history
+                raw_history = [
+                    h
+                    for h in raw_history
                     if (_parse_timestamp(event_fields(h)[3]) or _datetime_min) < ev_dt
                 ]
-            
-            # Paper §3.3: "we filter out ei from Hi if its length is less 
-            # than the total length L"
-            if len(history) < min_history_length:
+
+            masked_i = (si, rq, "?", ev_t)
+            short_s, long_s = extract_dual_history(
+                raw_history,
+                masked_i,
+                l=short_term_l,
+                L=dual_history_target_L,
+                alpha=dtf_alpha,
+            )
+            hai = combine_dual_history(short_s, long_s)
+
+            if len(hai) < min_history_length:
                 continue
-            
-            all_candidates.append((ev, sim_score, si, history))
-    
+
+            chosen = (ev, sim_score, si, hai)
+            break
+
+        if chosen is not None:
+            all_candidates.append(chosen)
+
     all_candidates.sort(key=lambda x: x[1], reverse=True)
     top_candidates = all_candidates[:top_a]
-    
+
     result = []
     for ev, sim_score, entity, history in top_candidates:
-        result.append(SimilarEventCandidate(
-            entity=entity,
-            event=ev,
-            history=history,
-            similarity_score=sim_score,
-        ))
-    
+        result.append(
+            SimilarEventCandidate(
+                entity=entity,
+                event=ev,
+                history=history,
+                similarity_score=sim_score,
+            )
+        )
+
     return result
 
 
@@ -326,6 +354,10 @@ def build_candidate_set_second_order(
 
 
 if __name__ == "__main__":
+    import os
+
+    os.environ.setdefault("LLM_SCORER", "long_term.dummy_scorer:score_fn")
+
     demo_data = [
         ("USA", "meet", "China", "2014-01-01"),
         ("USA", "meet", "Mexico", "2013-12-01"),
@@ -338,7 +370,14 @@ if __name__ == "__main__":
     cluster = ["USA", "Russia", "France"]
     
     candidates = find_similar_events_from_cluster(
-        query, cluster, demo_data, top_a=2, min_contexts=0
+        query,
+        cluster,
+        demo_data,
+        top_a=2,
+        min_contexts=0,
+        min_history_length=1,
+        short_term_l=2,
+        dual_history_target_L=10,
     )
     
     print("Similar event candidates:")

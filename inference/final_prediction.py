@@ -192,6 +192,7 @@ def _prepare_prediction_context(
     l = int(os.environ.get("SHORT_TERM_L", "20"))
     L = int(os.environ.get("HISTORY_LENGTH_L", "100"))
     a = int(os.environ.get("NUM_ANALOGICAL_EXAMPLES", "1"))
+    dtf_alpha = float(os.environ.get("DTF_ALPHA", "2.75"))
     
     masked_query = (sq, rq, "?", t)
     short_term_q, long_term_q = extract_dual_history(
@@ -214,6 +215,9 @@ def _prepare_prediction_context(
         top_a=a,
         min_contexts=int(os.environ.get("MIN_HISTORY_CONTEXTS", "300")),
         min_history_length=L,
+        short_term_l=l,
+        dual_history_target_L=L,
+        dtf_alpha=dtf_alpha,
     )
     
     if similar_candidates:
