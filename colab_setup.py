@@ -2,13 +2,21 @@
 Colab setup helper for AnRe TKG Forecasting.
 
 Usage (in Colab):
+    # Cell 1: Clone and install
+    !cd /content && rm -rf KLTN && git clone https://github.com/R1C0-22/KLTN.git
+    !pip install -q transformers>=4.41.0 accelerate bitsandbytes sentence-transformers scikit-learn
+    # Then: Runtime -> Restart session
+    
+    # Cell 2: Setup and test
     import os, sys
     os.chdir("/content/KLTN")
     sys.path.insert(0, "/content/KLTN")
     
-    from colab_setup import setup_env, test_llm, test_scoring, test_prediction
+    from colab_setup import setup_env, test_llm
     setup_env(model="qwen")  # or "llama"
     test_llm()
+
+IMPORTANT: Do NOT pin numpy version. Colab's preinstalled packages require numpy>=2.0.
 """
 
 from __future__ import annotations
@@ -17,6 +25,18 @@ import os
 import sys
 
 _REPO_ROOT = "/content/KLTN"
+
+
+def _check_numpy_compat() -> None:
+    """Warn if numpy version might cause binary incompatibility."""
+    try:
+        import numpy as np
+        major = int(np.__version__.split(".")[0])
+        if major < 2:
+            print(f"[WARNING] numpy {np.__version__} detected. Colab packages need numpy>=2.0.")
+            print("[WARNING] Run: pip install -U numpy && restart runtime")
+    except Exception:
+        pass
 
 
 def setup_env(
@@ -33,6 +53,8 @@ def setup_env(
         max_tokens: Max new tokens for generation
         hf_token: HF token for gated models (Llama)
     """
+    _check_numpy_compat()
+    
     model_map = {
         "qwen": "Qwen/Qwen2.5-7B-Instruct",
         "llama": "meta-llama/Meta-Llama-3-8B-Instruct",

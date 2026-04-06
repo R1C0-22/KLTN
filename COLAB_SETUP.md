@@ -1,158 +1,99 @@
-# Colab Setup (HF Llama/Qwen) - stable for AnRe (A100)
+# Colab Setup for AnRe TKG Forecasting
 
-## Common Colab errors
-- `PyTorch and torchvision were compiled with different CUDA major versions`
-- `Could not import module 'Gemma3nConfig'`
-- `StrictDataclassDefinitionError ... BloomConfig ... @strict`
+## Quick Start (A100 GPU)
 
-These are environment/package mismatch issues (not AnRe logic bugs).
+### Cell 1: Clone and Install
+```python
+# Mount Drive (optional - cache HF models)
+from google.colab import drive
+drive.mount('/content/drive')
 
-- **`cannot import name 'generate_analogical_reasoning' from 'analogical'`**  
-  Fixed in repo: `analogical` re-exports a small wrapper. `git pull` and restart runtime, or use `generate_analysis_process` / `construct_analogical_example` (paper path).
+import os
+os.environ["HF_HOME"] = "/content/drive/MyDrive/hf_cache"
 
-- **`os.environ["LLM PROVIDER"]` (space)** — wrong. Must be **`LLM_PROVIDER`** (underscore, no spaces) or `call_llm` never sees the HF backend.
+# Clone repo
+!cd /content && rm -rf KLTN && git clone https://github.com/R1C0-22/KLTN.git
 
-## Fix: install / upgrade (without breaking Colab)
-
-**Do not** run `pip uninstall -y torch transformers huggingface_hub tokenizers ...` on Colab first.  
-That removes packages that **other preinstalled libraries** (`torchtune`, `peft`, `timm`, `sentence-transformers`) depend on. Pip will often print long red lines like **“requires huggingface-hub … which is not installed”** during the *same* install — that is confusing but usually means “resolver saw a transient state”. If imports still work after the cell finishes, you can ignore those lines; if imports break, use **Runtime → Restart session** and re-run the **additive** install below (never bulk-uninstall first).
-
-### Recommended (additive — KISS)
-Run **once per runtime**, then **Restart session** if pip upgraded something major:
-
-```bash
-!pip -q install -U \
-  "transformers>=4.41.0,<7.0.0" \
-  accelerate \
-  bitsandbytes \
-  huggingface_hub \
-  tokenizers \
-  sentence-transformers \
-  scikit-learn \
-  numpy
+# Install dependencies (DO NOT pin numpy version!)
+!pip install -q transformers>=4.41.0 accelerate bitsandbytes sentence-transformers scikit-learn
 ```
 
-### Full “whole cell” shell (copy-paste) — A100 / typical Colab GPU
-Use this **as the only pip cell** when you start a fresh runtime (KISS).  
-Do **not** add `pip uninstall` before it.
+**After this cell: Runtime → Restart session**
 
-```bash
-%%bash
-set -e
-python -c "import torch; print('torch', torch.__version__, 'cuda', torch.cuda.is_available())" || true
+### Cell 2: Setup Environment
+```python
+import os, sys
+os.chdir("/content/KLTN")
+sys.path.insert(0, "/content/KLTN")
 
-pip install -U --no-cache-dir \
-  "transformers>=4.41.0,<7.0.0" \
-  accelerate \
-  bitsandbytes \
-  huggingface_hub \
-  tokenizers \
-  sentence-transformers \
-  scikit-learn \
-  numpy
+from colab_setup import setup_env, test_llm
 
-python -c "import transformers, huggingface_hub, tokenizers, bitsandbytes; print('HF stack OK', transformers.__version__)"
-python -c "import sentence_transformers; print('sentence-transformers OK')"
+# Choose model: "qwen" or "llama"
+setup_env(model="qwen", load_4bit=False, max_tokens=200)
+
+# Test LLM
+test_llm("Say hello in one sentence.")
 ```
 
-If pip prints red “requires X which is not installed” lines mid-install, wait until the cell finishes; then run the two `python -c` checks. If either fails: **Runtime → Restart session** and run this cell again (still no uninstall).
+### Cell 3: Run Paper Tests
+```python
+from colab_setup import test_analogical, test_scoring, test_prediction
 
-### Only if you truly have a CUDA / torch mismatch
-Try this **instead** of uninstall-everything (still order matters — torch first, then HF stack):
+# Analogical reasoning (paper §3.3)
+test_analogical()
 
-```bash
-%%bash
-set -e
-pip install --no-cache-dir --index-url https://download.pytorch.org/whl/cu124 \
-  torch==2.5.1 torchvision==0.20.1 torchaudio==2.5.1
-pip install -U --no-cache-dir \
-  "transformers>=4.41.0,<7.0.0" \
-  accelerate bitsandbytes huggingface_hub tokenizers \
-  sentence-transformers scikit-learn numpy
-python -c "import torch, transformers; print('torch', torch.__version__, 'transformers', transformers.__version__)"
+# Long-term scoring (paper §3.2)
+test_scoring(n_events=5)
+
+# End-to-end prediction
+test_prediction(split="valid", idx=0)
 ```
 
-Avoid mixing `!pip ...\\` line continuations with broken escaping in notebooks; use **`%%bash`** cells like above.
+---
 
-### If you already bulk-uninstalled and Colab is “broken”
-1. **Runtime → Restart session** (clears half-installed state).
-2. Re-run **only** the “torch first (optional) + additive HF stack” block above — no `pip uninstall`.
-3. If `import transformers` still fails: factory-reset runtime or start a **new notebook**; avoid uninstall storms.
+## Common Errors
 
-Notes:
-- After install, **Runtime → Restart session** if you still see import errors.
-- Re-run setup cells after restart (no stale imports).
+### `numpy.dtype size changed, may indicate binary incompatibility`
+**Cause**: You pinned `numpy<2.0` but Colab packages need `numpy>=2.0`.
 
-### Long prompts / PDC scoring (HF 8k models)
-If `predict_next_object` fails in `cloud_adapter.py` with **“Could not find '[' in model output”**, the long-term scorer prompt was too long for the context window. Fix:
-- Chunk scoring (default **32** events per LLM call): set `LLM_SCORE_CHUNK_SIZE=32` (or `24` on tighter GPUs).
-- Optional: `HF_MAX_INPUT_TOKENS=6000`. Do **not** set `HF_SCORE_MAX_NEW_TOKENS` too low (e.g. 128 truncates the JSON score array). If unset, the repo picks a safe minimum from chunk size; you may set a **floor** only (e.g. `512`).
-- Last resort for debugging: `LLM_SCORE_PARSE_FALLBACK=1` (deterministic pseudo-scores if JSON parse fails).
+**Fix**: 
+1. Do NOT install with `numpy>=1.26,<2.0`
+2. Just run: `pip install -q transformers accelerate bitsandbytes sentence-transformers scikit-learn`
+3. **Runtime → Restart session**
 
-## Env variables for this repo (A100)
-Example for **Llama 3**:
+### `Unsupported LLM_PROVIDER='hf'`
+**Cause**: Old code version on Colab.
+
+**Fix**: `git pull` and restart runtime.
+
+### `OPENAI_API_KEY is not set`
+**Cause**: Using cloud backend but no API key.
+
+**Fix**: Set `os.environ["LLM_PROVIDER"] = "hf"` for local HF models.
+
+---
+
+## Model Options
+
+| Model | HF ID | Notes |
+|-------|-------|-------|
+| Qwen 2.5 7B | `Qwen/Qwen2.5-7B-Instruct` | No token needed |
+| Llama 3 8B | `meta-llama/Meta-Llama-3-8B-Instruct` | Needs HF token (gated) |
+
+For Llama, set token:
+```python
+from google.colab import userdata
+os.environ["HF_TOKEN"] = userdata.get("HF_TOKEN")
+```
+
+---
+
+## Environment Variables
 
 ```python
-import os
-os.environ["LLM_PROVIDER"] = "hf"
-os.environ["HF_MODEL_ID"] = "meta-llama/Meta-Llama-3-8B-Instruct"
-os.environ["HF_LOAD_IN_4BIT"] = "0"        # A100: safe; set "1" if you want 4-bit
-os.environ["HF_MAX_NEW_TOKENS"] = "200"
-os.environ["LLM_SCORE_CHUNK_SIZE"] = "32"
-os.environ["HF_DO_SAMPLE"] = "0"
-# Optional PDC JSON floor (auto minimum is derived from chunk size if unset):
-# os.environ["HF_SCORE_MAX_NEW_TOKENS"] = "512"
-# For gated models (Llama): set HF_TOKEN via Colab Secrets (do not hardcode in repo)
-# from google.colab import userdata
-# os.environ["HF_TOKEN"] = userdata.get("HF_TOKEN")
-os.environ["TKG_DATA_DIR"] = "data/ICEWS05-15"
-```
-
-Example for **Qwen2.5-7B**:
-```python
-import os
-os.environ["LLM_PROVIDER"] = "hf"
+os.environ["LLM_PROVIDER"] = "hf"                    # Use HuggingFace local
 os.environ["HF_MODEL_ID"] = "Qwen/Qwen2.5-7B-Instruct"
-os.environ["HF_LOAD_IN_4BIT"] = "0"
+os.environ["HF_LOAD_IN_4BIT"] = "0"                  # "1" for 4-bit quantization
 os.environ["HF_MAX_NEW_TOKENS"] = "200"
-os.environ["LLM_SCORE_CHUNK_SIZE"] = "32"
-os.environ["HF_DO_SAMPLE"] = "0"
 os.environ["TKG_DATA_DIR"] = "data/ICEWS05-15"
 ```
-
-## Paper-aligned smoke tests (run after env set)
-1) `call_llm` smoke:
-```python
-from llm.unified import call_llm
-print(call_llm("Say hello in one short sentence."))
-```
-2) Analogical generation:
-```python
-from analogical import generate_analogical_reasoning
-event = ("China", "meet", "?", "2014-01-01")
-similar_events = [("Russia", "meet", "Belarus", "2013-01-01"), ("Iran", "meet", "Turkey", "2013-02-01")]
-print(generate_analogical_reasoning(event, similar_events)[:500])
-```
-3) Long-term scoring:
-```python
-from preprocessing import load_dataset
-from long_term.long_term_filter import compute_scores_with_llm
-hist = load_dataset("data/ICEWS05-15", splits=["train"])[0:5]
-q = (hist[0].subject, hist[0].relation, "?", hist[0].timestamp)
-print(compute_scores_with_llm(hist, q))
-```
-4) End-to-end one-query prediction:
-```python
-import os
-from preprocessing import load_dataset
-from inference.final_prediction import predict_next_object
-
-os.environ["TKG_DATA_DIR"] = "data/ICEWS05-15"  # required when query is a plain tuple
-v = load_dataset("data/ICEWS05-15", splits=["valid"])
-e = v[0]
-q = (e.subject, e.relation, "?", e.timestamp)
-print(predict_next_object(q))
-```
-
-If `data/ICEWS05-15` exists under the repo root, you may omit `TKG_DATA_DIR` — the inference module will default to that path.
-

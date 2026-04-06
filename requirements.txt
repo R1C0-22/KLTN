@@ -1,3 +1,5 @@
+transformers>=4.41.0
+accelerate
+bitsandbytes
 sentence-transformers
 scikit-learn
-numpy
