@@ -36,6 +36,7 @@ For Hugging Face local (Colab GPU — download weights, matches paper model fami
     HF_MAX_NEW_TOKENS=512
     HF_TRUST_REMOTE_CODE=0           # set 1 only if the model card asks for it
     HF_MAX_INPUT_TOKENS=...          # optional cap on *prompt* tokens (truncate); avoids HF crashes on long PDC prompts
+    HF_CLEAR_GPU_CACHE=0             # default off — empty_cache every gen is slow; set 1 only if OOM
 
     pip install torch transformers accelerate bitsandbytes
 
@@ -342,6 +343,8 @@ def _call_huggingface(prompt: str) -> str:
         eos_token_id=getattr(tokenizer, "eos_token_id", None),
     )
 
+    out = None
+    new_tokens = None
     try:
         with torch.no_grad():
             out = model.generate(
@@ -350,22 +353,23 @@ def _call_huggingface(prompt: str) -> str:
                 generation_config=gen_cfg,
                 use_cache=True,
             )
-        
-        new_tokens = out[0, input_ids.shape[1]:]
+
+        new_tokens = out[0, input_ids.shape[1] :]
         result = tokenizer.decode(new_tokens, skip_special_tokens=True)
-        
+
         if verbose:
             _log(f"[llm] Generated {len(new_tokens)} tokens")
     finally:
-        # Clean up tensors and GPU cache to prevent OOM
         del input_ids, attention_mask, enc
-        if 'out' in dir():
+        if out is not None:
             del out
-        if 'new_tokens' in dir():
+        if new_tokens is not None:
             del new_tokens
         gc.collect()
-        _clear_gpu_cache()
-    
+        # Clearing CUDA cache every call is very slow on Colab; set HF_CLEAR_GPU_CACHE=1 if OOM.
+        if _env_truthy("HF_CLEAR_GPU_CACHE", False):
+            _clear_gpu_cache()
+
     return result
 
 
@@ -576,8 +580,9 @@ def _logprobs_huggingface(prompt: str, candidate_labels: list[str]) -> list[floa
     finally:
         del input_ids, attention_mask, enc, outputs, next_token_logits
         gc.collect()
-        _clear_gpu_cache()
-    
+        if _env_truthy("HF_CLEAR_GPU_CACHE", False):
+            _clear_gpu_cache()
+
     return logprob_scores
 
 

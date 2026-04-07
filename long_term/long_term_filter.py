@@ -50,6 +50,23 @@ def _softmax(logits: Sequence[float]) -> list[float]:
     return [v / denom for v in exps]
 
 
+def _cap_events_per_timestep(events: Sequence[Any]) -> list[Any]:
+    """Bound LLM PDC cost when one calendar day has very many events (common on ICEWS).
+
+    Env: ``LLM_SCORE_MAX_EVENTS_PER_TIMESTEP`` (default 64). ``0`` or negative = no cap.
+    Keeps the *last* ``cap`` events in timestep order (typically most recent within the day).
+    """
+    ev = list(events)
+    raw = os.environ.get("LLM_SCORE_MAX_EVENTS_PER_TIMESTEP", "64").strip()
+    try:
+        cap = int(raw)
+    except ValueError:
+        cap = 64
+    if cap <= 0 or len(ev) <= cap:
+        return ev
+    return ev[-cap:]
+
+
 def _load_prompt_template() -> str:
     # `Code/` is the project root; prompts live under `Code/prompts/`.
     code_root = Path(__file__).resolve().parents[1]
@@ -487,23 +504,21 @@ def extract_dual_history(
     for date_key, events in timestep_groups:
         if len(long_term_selected) >= target_long_term_len:
             break
-        
-        # Score events in this time-step using LLM (PDC)
-        scores = compute_scores_with_llm(events, query_event)
-        
-        # Compute dynamic threshold for this time-step
-        F = len(events)
+
+        scored_events = _cap_events_per_timestep(events)
+        scores = compute_scores_with_llm(scored_events, query_event)
+
+        F = len(scored_events)
         group_date = datetime.strptime(date_key, "%Y-%m-%d")
         delta_t_days = (q_dt - group_date).days
         if delta_t_days < 0:
             delta_t_days = 0
-        
+
         c_j = dynamic_threshold(F=F, delta_t=delta_t_days, T=T_days, alpha=alpha)
-        
-        # Apply softmax within this time-step group and filter by threshold
+
         probs = _softmax(scores)
-        
-        for idx, (ev, prob) in enumerate(zip(events, probs)):
+
+        for ev, prob in zip(scored_events, probs):
             if prob >= c_j:
                 long_term_selected.append(ev)
     

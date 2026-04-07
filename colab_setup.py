@@ -99,7 +99,12 @@ def setup(
     os.environ["TKG_DATA_DIR"] = os.path.join(REPO_ROOT, data_dir)
     os.environ["LLM_SCORE_PARSE_FALLBACK"] = "1"
     os.environ.setdefault("HF_SCORE_MAX_NEW_TOKENS", "256")
-    os.environ.setdefault("LLM_SCORE_CHUNK_SIZE", "24")
+    # Larger chunks => fewer HF forward passes per timestep (faster; slightly longer prompts).
+    os.environ.setdefault("LLM_SCORE_CHUNK_SIZE", "48")
+    # Cap events per calendar day before PDC — ICEWS days can have 1000+ events.
+    os.environ.setdefault("LLM_SCORE_MAX_EVENTS_PER_TIMESTEP", "64")
+    # empty_cache() after every generate() is very slow on Colab; enable only if OOM.
+    os.environ.setdefault("HF_CLEAR_GPU_CACHE", "0")
     os.environ["LLM_VERBOSE"] = "1" if verbose else "0"
 
     # Single place to bind callables (Scout rule: explicit beats implicit).
@@ -247,11 +252,9 @@ def test_prediction_quick() -> str:
 
 def test_prediction(sample_size: int = 500, use_second_order: bool = False) -> str:
     """Test 4b: Full prediction with real data (includes clustering).
-    
-    WARNING: This is slow (~2-5 min) because it:
-    - Loads full training data
-    - Embeds and clusters all entities
-    - Runs the complete AnRe pipeline
+
+    WARNING: Runtime is dominated by many LLM calls (PDC per timestep + analogical + predict).
+    On A100 prefer ``setup(..., load_4bit=False)`` and ``verbose=False`` for speed.
     
     Args:
         sample_size: Max entities for clustering (reduces time and memory)
