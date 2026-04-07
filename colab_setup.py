@@ -1,37 +1,47 @@
 """
 Colab setup helper for AnRe TKG Forecasting.
 
-QUICKSTART (paste into Colab cell):
-────────────────────────────────────────────────────────────────────
-# Cell 1: Clone + install (run once, restart runtime after)
-!cd /content && rm -rf KLTN && git clone https://github.com/R1C0-22/KLTN.git
-!pip install -q transformers accelerate bitsandbytes sentence-transformers scikit-learn
+Why shells sometimes break on Colab
+────────────────────────────────────
+If you delete the folder that was the notebook's current working directory, the
+shell session keeps a "dead" cwd → ``getcwd: cannot access parent directories``.
+Fix: always ``cd /content`` before ``git`` / ``pip`` (see ``ensure_content_cwd``).
 
-# Cell 2: Mount drive for HF cache (optional but saves time)
-from google.colab import drive, userdata
-drive.mount('/content/drive')
+QUICKSTART (paste cells in order)
+────────────────────────────────────
+# --- Cell 0 (only if you see getcwd / pip "folder no longer found") ---
 import os
-os.environ["HF_HOME"] = "/content/drive/MyDrive/hf_cache"
-os.environ["HF_TOKEN"] = userdata.get("HF_TOKEN")
+if os.path.isdir("/content"):
+    os.chdir("/content")
 
-# Cell 3: Setup and quick test
-import sys, os
-sys.path.insert(0, "/content/KLTN")
-os.chdir("/content/KLTN")
+# --- Cell 1: repo + pip (idempotent; never rm -rf KLTN blindly) ---
+# Option A — one line per command (works in Colab):
+# !cd /content && (test -d KLTN/.git && git -C KLTN pull --ff-only || test ! -d KLTN && git clone https://github.com/R1C0-22/KLTN.git || (echo 'Fix /content/KLTN manually' && exit 1))
+# !cd /content && python -m pip install -q -U pip && python -m pip install -q transformers accelerate bitsandbytes sentence-transformers scikit-learn numpy
+# Option B — use ``colab_setup.ensure_colab_repo()`` after the first clone exists (Cell 3).
 
-from colab_setup import setup, test_quick
-setup("llama")
-test_quick()
+# --- Cell 2: Drive + HF token (optional) ---
+# from google.colab import drive, userdata
+# drive.mount("/content/drive")
+# import os
+# os.environ["HF_HOME"] = "/content/drive/MyDrive/hf_cache"
+# os.environ["HF_TOKEN"] = userdata.get("HF_TOKEN")
 
-# Cell 4: Full test (slower, ~2-5 min)
-from colab_setup import test_prediction
-test_prediction()
-────────────────────────────────────────────────────────────────────
+# --- Cell 3: copy data from Drive (if you store datasets on Drive) ---
+# !test -d /content/drive/MyDrive/data && cp -r /content/drive/MyDrive/data /content/KLTN/ || true
+
+# --- Cell 4: run tests ---
+# import sys, os
+# sys.path.insert(0, "/content/KLTN")
+# os.chdir("/content/KLTN")
+# from colab_setup import setup, test_quick
+# setup("llama")   # Meta-Llama-3-8B-Instruct; L4/A100: 4-bit default
+# test_quick()
 
 Extras:
   - Disk cache: os.environ["LLM_CACHE_DIR"] = "/content/drive/MyDrive/llm_cache"
-  - Strict paper Oq (no adaptive expansion): setup(..., adaptive_candidates=False)
-  - Fast smoke test (smaller context): setup(..., short_term_l=5, history_length=30)
+  - Strict paper Oq: setup(..., adaptive_candidates=False)
+  - Fast smoke: setup(..., short_term_l=5, history_length=30)
 ────────────────────────────────────────────────────────────────────
 """
 
@@ -39,15 +49,64 @@ from __future__ import annotations
 
 import gc
 import os
+import subprocess
+import sys
 import time
+from pathlib import Path
 
 REPO_ROOT = "/content/KLTN"
 DEFAULT_DATA_DIR = "data/ICEWS05-15"
+DEFAULT_REPO_URL = "https://github.com/R1C0-22/KLTN.git"
 
 MODELS = {
     "qwen": "Qwen/Qwen2.5-7B-Instruct",
     "llama": "meta-llama/Meta-Llama-3-8B-Instruct",
 }
+
+
+def ensure_content_cwd() -> None:
+    """Reset process cwd to ``/content`` (fixes Colab shells after a deleted folder)."""
+    if Path("/content").is_dir():
+        os.chdir("/content")
+
+
+def ensure_colab_repo(
+    dest: str = REPO_ROOT,
+    repo_url: str = DEFAULT_REPO_URL,
+) -> None:
+    """Clone ``repo_url`` into ``dest``, or run ``git pull --ff-only`` if already a repo."""
+    ensure_content_cwd()
+    path = Path(dest)
+    if (path / ".git").is_dir():
+        subprocess.run(
+            ["git", "-C", str(path), "pull", "--ff-only"],
+            check=True,
+        )
+        return
+    if path.exists():
+        raise RuntimeError(
+            f"{path} exists but is not a git repository. "
+            "Remove or rename it, then run again."
+        )
+    subprocess.run(["git", "clone", repo_url, str(path)], check=True)
+
+
+def pip_install_colab_deps(extra: list[str] | None = None) -> None:
+    """Install runtime deps used by this project (Colab / GPU)."""
+    base = [
+        "transformers",
+        "accelerate",
+        "bitsandbytes",
+        "sentence-transformers",
+        "scikit-learn",
+        "numpy",
+    ]
+    if extra:
+        base.extend(extra)
+    subprocess.run(
+        [sys.executable, "-m", "pip", "install", "-q", "-U", "pip", *base],
+        check=True,
+    )
 
 
 def _log(msg: str) -> None:
@@ -77,7 +136,7 @@ def setup(
     adaptive_candidates: bool = True,
     verbose: bool = True,
 ) -> None:
-    """Configure environment for HF local LLM inference (Colab GPU, e.g. L4).
+    """Configure environment for HF local LLM inference (Colab GPU, e.g. L4 / A100).
     
     Args:
         model: "qwen", "llama", or full HF model ID
@@ -90,8 +149,14 @@ def setup(
             improvement; paper Table 2). If False, strict Oq only.
         verbose: Enable real-time logging
     """
+    if Path(REPO_ROOT).is_dir():
+        try:
+            os.chdir(REPO_ROOT)
+        except OSError:
+            pass
+
     model_id = MODELS.get(model.lower(), model)
-    
+
     os.environ["LLM_PROVIDER"] = "hf"
     os.environ["HF_MODEL_ID"] = model_id
     os.environ["HF_LOAD_IN_4BIT"] = "1" if load_4bit else "0"
