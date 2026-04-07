@@ -77,7 +77,7 @@ def setup(
     adaptive_candidates: bool = True,
     verbose: bool = True,
 ) -> None:
-    """Configure environment for HF local LLM inference.
+    """Configure environment for HF local LLM inference (Colab GPU, e.g. L4).
     
     Args:
         model: "qwen", "llama", or full HF model ID
@@ -101,6 +101,15 @@ def setup(
     os.environ.setdefault("HF_SCORE_MAX_NEW_TOKENS", "256")
     os.environ.setdefault("LLM_SCORE_CHUNK_SIZE", "24")
     os.environ["LLM_VERBOSE"] = "1" if verbose else "0"
+
+    # Single place to bind callables (Scout rule: explicit beats implicit).
+    # Override in the notebook if you use a custom adapter.
+    os.environ.setdefault("LLM_SCORER", "llm.cloud_adapter:score_fn")
+    os.environ.setdefault("LLM_GENERATOR", "llm.cloud_adapter:generate_fn")
+    os.environ.setdefault("LLM_PREDICTOR", "llm.cloud_adapter:predict_fn")
+    os.environ.setdefault(
+        "LLM_PREDICTOR_LOGPROBS", "llm.cloud_adapter:predict_with_logprobs_fn"
+    )
     
     os.environ["SHORT_TERM_L"] = str(short_term_l)
     os.environ["HISTORY_LENGTH_L"] = str(history_length)

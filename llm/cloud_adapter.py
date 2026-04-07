@@ -31,7 +31,8 @@ On Colab you typically just export those env vars at the notebook level.
 Optional disk cache (repeatable experiments, fewer HF forward passes):
     LLM_CACHE_DIR=/path/to/dir
     Keys include LLM_PROVIDER and HF_MODEL_ID / OPENAI_MODEL / GROQ_MODEL.
-    Per-step opt-out: LLM_CACHE_PREDICT=0 (final predict_fn only).
+    Per-step opt-out: LLM_CACHE_PREDICT=0 (final predict_fn only);
+    LLM_CACHE_LOGPROBS=0 (predict_with_logprobs_fn only).
 
 Long-term PDC scoring (`score_fn`) extras (Hugging Face):
     HF_SCORE_MAX_NEW_TOKENS=...     # optional floor; auto minimum scales with chunk size so JSON is not truncated
@@ -251,7 +252,26 @@ def predict_with_logprobs_fn(
         The predicted entity is the one with highest probability.
     """
     import math
-    
+
+    use_logprob_cache = os.environ.get("LLM_CACHE_LOGPROBS", "1").strip().lower() in (
+        "1",
+        "true",
+        "yes",
+        "on",
+    )
+    cache_payload = prompt + "\n" + json.dumps(candidates, ensure_ascii=False)
+    if use_logprob_cache:
+        cached = cache_get("logprobs", cache_payload)
+        if cached is not None:
+            try:
+                payload = json.loads(cached)
+                pred = str(payload["predicted"])
+                probs = [float(x) for x in payload["probs"]]
+                if len(probs) == len(candidates):
+                    return pred, probs
+            except (KeyError, TypeError, ValueError, json.JSONDecodeError):
+                pass
+
     # Map candidates to numerical labels (1, 2, 3, ...)
     # Paper: "we map each candidate entity to a numerical token"
     labels = [str(i) for i in range(1, len(candidates) + 1)]
@@ -274,7 +294,17 @@ def predict_with_logprobs_fn(
     # Paper: "sort the probability results and select the highest probability result"
     best_idx = probs.index(max(probs))
     predicted = candidates[best_idx] if candidates else ""
-    
+
+    if use_logprob_cache:
+        cache_set(
+            "logprobs",
+            cache_payload,
+            json.dumps(
+                {"predicted": predicted, "probs": probs},
+                ensure_ascii=False,
+            ),
+        )
+
     return predicted, probs
 
 

@@ -8,6 +8,7 @@ Namespaces used by llm.cloud_adapter:
   - "generate" — analogical reasoning
   - "score" — long-term PDC (raw model output before JSON parse)
   - "predict" — final entity prediction (normalized text)
+  - "logprobs" — paper §3.3 candidate scoring (JSON: predicted + probs)
 
 Cache keys include LLM_PROVIDER and the active model id so different models
 do not share entries.
