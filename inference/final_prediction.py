@@ -175,6 +175,22 @@ def _extract_predicted_object(llm_output: str, candidates: Sequence[str]) -> str
     if best:
         return best
 
+    # 5) Last-resort: standalone index on its own line (models often answer on the last line)
+    for line in reversed(out.splitlines()):
+        line = line.strip()
+        if not line:
+            continue
+        m = re.fullmatch(r"(\d{1,8})\s*\.?", line)
+        if m:
+            ix = int(m.group(1))
+            if 1 <= ix <= n:
+                return cand_list[ix - 1]
+
+    # 6) Single-token junk (e.g. ")" from truncation) — do not return as entity
+    fl = (first_line or out).strip()
+    if len(fl) <= 2 and fl and not any(fl == c for c in cand_list):
+        return ""
+
     return first_line or out
 
 

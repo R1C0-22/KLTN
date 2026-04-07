@@ -161,6 +161,10 @@ def setup(
     os.environ["HF_MODEL_ID"] = model_id
     os.environ["HF_LOAD_IN_4BIT"] = "1" if load_4bit else "0"
     os.environ["HF_MAX_NEW_TOKENS"] = str(max_tokens)
+    # Final prediction: allow a bit more than generic max_tokens so the model can
+    # print a short rationale + the index (paper §3.3). Overrides HF_MAX_NEW_TOKENS
+    # only inside ``predict_fn`` (see llm/cloud_adapter.py).
+    os.environ.setdefault("HF_PREDICT_MAX_NEW_TOKENS", str(max(128, min(512, max_tokens * 2))))
     os.environ["TKG_DATA_DIR"] = os.path.join(REPO_ROOT, data_dir)
     os.environ["LLM_SCORE_PARSE_FALLBACK"] = "1"
     os.environ.setdefault("HF_SCORE_MAX_NEW_TOKENS", "256")

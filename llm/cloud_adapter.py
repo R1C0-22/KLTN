@@ -187,26 +187,31 @@ def score_fn(prompt: str, events: Sequence[Any]) -> List[float]:
     return scores
 
 
-def _normalize_predict_text(text: str) -> str:
-    """Strip model output to a single entity line (quotes, first line)."""
+def _strip_outer_quotes(text: str) -> str:
+    """Remove one pair of surrounding quotes; keep all lines (prediction may be line 2+)."""
     text = text.strip()
     if len(text) >= 2 and (
         (text[0] == '"' and text[-1] == '"')
         or (text[0] == "'" and text[-1] == "'")
     ):
         text = text[1:-1].strip()
-    return text.splitlines()[0].strip()
+    return text
 
 
 def predict_fn(prompt: str) -> str:
     """
     Final object prediction used by `predict_next_object`.
 
-    The prediction prompt (`prompts/prediction_prompt.txt`) tells the model
-    to return ONLY the predicted entity string.
+    The prediction prompt asks for a candidate **index** (1..|Oq|) or entity name.
+    We return the **full** model output (after stripping outer quotes). Do not
+    truncate to the first line — chatty models put the index on the last line
+    (see IMPROVE.MD / paper §3.3 parsing).
 
     Cached when LLM_CACHE_DIR is set (same mechanism as generate_fn / score_fn).
     Set LLM_CACHE_PREDICT=0 to bypass cache for this step.
+
+    Optional: ``HF_PREDICT_MAX_NEW_TOKENS`` overrides ``HF_MAX_NEW_TOKENS`` for this call only
+    (short rationale + index; default in ``setup()`` is enough for most cases).
     """
     use_cache = os.environ.get("LLM_CACHE_PREDICT", "1").strip().lower() in (
         "1", "true", "yes", "on",
@@ -214,12 +219,23 @@ def predict_fn(prompt: str) -> str:
     if use_cache:
         cached = cache_get("predict", prompt)
         if cached is not None:
-            return _normalize_predict_text(cached)
+            return _strip_outer_quotes(cached)
 
-    out = call_llm(prompt)
+    saved_max = os.environ.get("HF_MAX_NEW_TOKENS")
+    predict_max = os.environ.get("HF_PREDICT_MAX_NEW_TOKENS", "").strip()
+    if predict_max.isdigit():
+        os.environ["HF_MAX_NEW_TOKENS"] = predict_max
+    try:
+        out = call_llm(prompt)
+    finally:
+        if saved_max is None:
+            os.environ.pop("HF_MAX_NEW_TOKENS", None)
+        else:
+            os.environ["HF_MAX_NEW_TOKENS"] = saved_max
+
     if not isinstance(out, str):
         out = str(out)
-    text = _normalize_predict_text(out)
+    text = _strip_outer_quotes(out)
 
     if use_cache:
         cache_set("predict", prompt, text)
