@@ -138,6 +138,7 @@ class _PredictionContext:
     """Internal context for prediction pipeline."""
     candidate_set: list[str]
     final_prompt: str
+    used_second_order_neighbors: bool = False
 
 
 def _prepare_prediction_context(
@@ -157,6 +158,7 @@ def _prepare_prediction_context(
         find_similar_events_from_cluster,
         build_candidate_set,
         build_candidate_set_second_order,
+        build_candidate_set_adaptive,
     )
     from analogical import (
         construct_analogical_examples_batch,
@@ -203,8 +205,15 @@ def _prepare_prediction_context(
     )
     history_q = combine_dual_history(short_term_q, long_term_q)
     
+    used_o2 = False
     if use_second_order_candidates:
         candidate_set = build_candidate_set_second_order(entity_history_q, sq, data)
+        used_o2 = True
+    elif _env_truthy("ADAPTIVE_CANDIDATES", default=False):
+        min_c = int(os.environ.get("ADAPTIVE_MIN_CANDIDATES", "3"))
+        candidate_set, used_o2 = build_candidate_set_adaptive(
+            entity_history_q, sq, data, min_first_order=min_c
+        )
     else:
         candidate_set = build_candidate_set(entity_history_q, sq)
     
@@ -252,6 +261,7 @@ def _prepare_prediction_context(
     return _PredictionContext(
         candidate_set=candidate_set,
         final_prompt=final_prompt,
+        used_second_order_neighbors=used_o2,
     )
 
 

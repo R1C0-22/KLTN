@@ -28,6 +28,10 @@ For Groq:
 
 On Colab you typically just export those env vars at the notebook level.
 
+Optional disk cache (repeatable experiments, fewer HF forward passes):
+    LLM_CACHE_DIR=/path/to/dir
+    Keys include LLM_PROVIDER and HF_MODEL_ID / OPENAI_MODEL / GROQ_MODEL.
+
 Long-term PDC scoring (`score_fn`) extras (Hugging Face):
     HF_SCORE_MAX_NEW_TOKENS=...     # optional floor; auto minimum scales with chunk size so JSON is not truncated
     LLM_SCORE_PARSE_FALLBACK=1      # optional; if model output is not a JSON array, use deterministic pseudo-scores
@@ -41,6 +45,7 @@ import os
 import re
 from typing import Any, Sequence, List
 
+from .response_cache import cache_get, cache_set
 from .unified import call_llm, call_llm_logprobs
 
 
@@ -61,10 +66,16 @@ def _effective_score_max_new_tokens(n_events: int) -> int:
 
 def generate_fn(prompt: str) -> str:
     """Free-form generation used for analogical reasoning text."""
+    cached = cache_get("generate", prompt)
+    if cached is not None:
+        return cached.strip()
+
     out = call_llm(prompt)
     if not isinstance(out, str):
         out = str(out)
-    return out.strip()
+    text = out.strip()
+    cache_set("generate", prompt, text)
+    return text
 
 
 def _extract_first_json_array(text: str) -> List[float]:
@@ -127,17 +138,23 @@ def score_fn(prompt: str, events: Sequence[Any]) -> List[float]:
     The prompt (from `prompts/filter_prompt.txt`) must instruct the model
     to output ONLY a JSON array of real-valued logits, one per event.
     """
-    n_ev = len(events)
-    score_limit = str(_effective_score_max_new_tokens(n_ev))
-    saved_tok = os.environ.get("HF_MAX_NEW_TOKENS")
-    os.environ["HF_MAX_NEW_TOKENS"] = score_limit
-    try:
-        raw = call_llm(prompt)
-    finally:
-        if saved_tok is None:
-            os.environ.pop("HF_MAX_NEW_TOKENS", None)
-        else:
-            os.environ["HF_MAX_NEW_TOKENS"] = saved_tok
+    cached_raw = cache_get("score", prompt)
+    if cached_raw is not None:
+        raw = cached_raw
+    else:
+        n_ev = len(events)
+        score_limit = str(_effective_score_max_new_tokens(n_ev))
+        saved_tok = os.environ.get("HF_MAX_NEW_TOKENS")
+        os.environ["HF_MAX_NEW_TOKENS"] = score_limit
+        try:
+            raw = call_llm(prompt)
+        finally:
+            if saved_tok is None:
+                os.environ.pop("HF_MAX_NEW_TOKENS", None)
+            else:
+                os.environ["HF_MAX_NEW_TOKENS"] = saved_tok
+        raw = raw if isinstance(raw, str) else str(raw)
+        cache_set("score", prompt, raw)
 
     if not isinstance(raw, str):
         raw = str(raw)

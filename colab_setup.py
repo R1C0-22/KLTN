@@ -27,6 +27,11 @@ test_quick()
 from colab_setup import test_prediction
 test_prediction()
 ────────────────────────────────────────────────────────────────────
+
+Extras:
+  - Disk cache: os.environ["LLM_CACHE_DIR"] = "/content/drive/MyDrive/llm_cache"
+  - Strict paper Oq only: os.environ["ADAPTIVE_CANDIDATES"] = "0"
+────────────────────────────────────────────────────────────────────
 """
 
 from __future__ import annotations
@@ -97,6 +102,8 @@ def setup(
     os.environ["HISTORY_LENGTH_L"] = str(history_length)
     os.environ["NUM_ANALOGICAL_EXAMPLES"] = "1"
     os.environ["MIN_HISTORY_CONTEXTS"] = "20"
+    os.environ.setdefault("ADAPTIVE_CANDIDATES", "1")
+    os.environ.setdefault("ADAPTIVE_MIN_CANDIDATES", "3")
     
     clear_gpu_memory()
     
@@ -274,6 +281,7 @@ def test_prediction(sample_size: int = 500, use_second_order: bool = False) -> s
     in_oq = gt_norm in {c.strip() for c in ctx.candidate_set}
     _log(
         f"[test_prediction] |Oq|={len(ctx.candidate_set)} "
+        f"used_second_order_neighbors={getattr(ctx, 'used_second_order_neighbors', False)} "
         f"ground_truth_in_candidate_set={in_oq}"
     )
     if not in_oq:

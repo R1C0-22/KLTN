@@ -353,6 +353,26 @@ def build_candidate_set_second_order(
     return sorted(second_order)
 
 
+def build_candidate_set_adaptive(
+    entity_history: Sequence[Any],
+    query_subject: str,
+    all_data: Sequence[Any],
+    *,
+    min_first_order: int,
+) -> tuple[list[str], bool]:
+    """Use paper Oq when large enough; otherwise expand to O²q.
+
+    Mirrors the recall vs. efficiency trade-off in paper §6.2 / Table 2:
+    keep first-order neighbors when they already form a rich candidate set,
+    and only pay for second-order neighbors when |Oq| would be too small.
+    """
+    first = build_candidate_set(entity_history, query_subject)
+    if len(first) >= max(0, min_first_order):
+        return first, False
+    second = build_candidate_set_second_order(entity_history, query_subject, all_data)
+    return second, True
+
+
 if __name__ == "__main__":
     import os
 
