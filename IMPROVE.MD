@@ -18,5 +18,5 @@ w/o long-term, w/o short-term, w/o analogical (bạn đã có cấu trúc để 
 Đây là phần hội đồng rất hay hỏi.
 
 Prediction §3.3 (đã chỉnh trong code)
-- Parse số chỉ mục 1..|Oq| trước khi khớp substring; tránh chọn nhầm khi LLM sinh đoạn dài.
+- Parse số chỉ mục 1..|Oq| trước khi khớp substring; ưu tiên dòng cuối / “answer is …” / ``[k]``; tránh chọn nhầm khi LLM sinh đoạn dài nhắc nhiều entity.
 - Giới hạn logprob path khi |Oq| rất lớn: env ``MAX_LOGPROB_CANDIDATES`` (mặc định 512), còn lại dùng generate + parse số.

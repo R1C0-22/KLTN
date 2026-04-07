@@ -14,3 +14,5 @@ Candidate Answers:
 {candidates}
 
 Your choice is:
+
+IMPORTANT: After any brief reasoning, output exactly one final line containing only the integer index (1 to N, where N is the number of candidates above). Do not put the entity name on that line.

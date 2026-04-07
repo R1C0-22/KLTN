@@ -114,9 +114,9 @@ def _extract_predicted_object(llm_output: str, candidates: Sequence[str]) -> str
     """Extract the predicted entity from LLM output.
 
     Paper §3.3: the model should output the **index** (1..|Oq|) of the answer.
-    Prefer parsing that index before any substring heuristic — the old
-    "first candidate substring found in text" rule breaks when the model
-    outputs a long rationale that mentions several entities.
+    Prefer parsing that index before any substring heuristic — chatty models
+    often mention several candidate names in the rationale; longest-substring
+    then picks the wrong entity unless index lines are handled first.
     """
     out = llm_output.strip()
     if not candidates:
@@ -133,14 +133,44 @@ def _extract_predicted_object(llm_output: str, candidates: Sequence[str]) -> str
             return idx
         return None
 
-    # 1) Leading number on any line (e.g. "42" or "Answer: 17")
-    for line in out.splitlines():
-        line = line.strip()
-        m = re.match(r"^(\d{1,8})\b", line)
+    lines = [ln.strip() for ln in out.splitlines()]
+    non_empty = [ln for ln in lines if ln]
+
+    # 1) Bottom-up: standalone index (models often put the final answer on the last line)
+    for line in reversed(non_empty):
+        m = re.fullmatch(r"(\d{1,8})\s*\.?", line)
         if m:
             ix = _index_from_match(m)
             if ix is not None:
                 return cand_list[ix - 1]
+        m = re.search(
+            r"(?:^|\b)(?:answer|choice|final|index|prediction)\s*[:=#]?\s*(\d{1,8})\s*$",
+            line,
+            re.IGNORECASE,
+        )
+        if m:
+            ix = _index_from_match(m)
+            if ix is not None:
+                return cand_list[ix - 1]
+
+    # 2) Tail of output: "... answer is 1234" / "[1234]"
+    tail = out[-800:] if len(out) > 800 else out
+    for m in re.finditer(
+        r"(?:answer|choice|index|prediction)\s+(?:is|[:=#])\s*(\d{1,8})\b",
+        tail,
+        re.IGNORECASE,
+    ):
+        ix = _index_from_match(m)
+        if ix is not None:
+            return cand_list[ix - 1]
+    m = re.search(r"\[(\d{1,8})\]", tail)
+    if m:
+        ix = _index_from_match(m)
+        if ix is not None:
+            return cand_list[ix - 1]
+
+    # 3) Any line: explicit "Answer: 17" (not only last line)
+    for line in non_empty:
         m2 = re.search(
             r"(?:choice|answer|number)\s*[:is.]+\s*(\d{1,8})\b",
             line,
@@ -151,13 +181,23 @@ def _extract_predicted_object(llm_output: str, candidates: Sequence[str]) -> str
             if ix is not None:
                 return cand_list[ix - 1]
 
-    # 2) Exact first line == entity name
-    first_line = out.splitlines()[0].strip() if out else ""
+    # 4) Leading number on a line — skip numbered-list lines like "1. Some text"
+    for line in non_empty:
+        if re.match(r"^\d{1,3}\.\s+\S", line):
+            continue
+        m = re.match(r"^(\d{1,8})\b", line)
+        if m:
+            ix = _index_from_match(m)
+            if ix is not None:
+                return cand_list[ix - 1]
+
+    # 5) Exact first line == entity name
+    first_line = non_empty[0] if non_empty else ""
     for c in cand_list:
         if first_line == c:
             return c
 
-    # 3) JSON
+    # 6) JSON
     try:
         maybe = json.loads(out)
         if isinstance(maybe, str) and maybe in cand_list:
@@ -167,7 +207,7 @@ def _extract_predicted_object(llm_output: str, candidates: Sequence[str]) -> str
     except Exception:
         pass
 
-    # 4) Longest substring match (avoids picking a short name that appears inside others)
+    # 7) Longest substring match (last resort — can be wrong if rationale cites many entities)
     best = ""
     for c in sorted(cand_list, key=len, reverse=True):
         if c in out and len(c) > len(best):
@@ -175,18 +215,7 @@ def _extract_predicted_object(llm_output: str, candidates: Sequence[str]) -> str
     if best:
         return best
 
-    # 5) Last-resort: standalone index on its own line (models often answer on the last line)
-    for line in reversed(out.splitlines()):
-        line = line.strip()
-        if not line:
-            continue
-        m = re.fullmatch(r"(\d{1,8})\s*\.?", line)
-        if m:
-            ix = int(m.group(1))
-            if 1 <= ix <= n:
-                return cand_list[ix - 1]
-
-    # 6) Single-token junk (e.g. ")" from truncation) — do not return as entity
+    # 8) Single-token junk (e.g. ")" from truncation) — do not return as entity
     fl = (first_line or out).strip()
     if len(fl) <= 2 and fl and not any(fl == c for c in cand_list):
         return ""
