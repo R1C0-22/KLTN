@@ -4,6 +4,11 @@ Optional on-disk cache for LLM text responses (Colab / repeated runs).
 Set LLM_CACHE_DIR to a writable directory (e.g. Google Drive path). When
 unset, all cache operations are no-ops.
 
+Namespaces used by llm.cloud_adapter:
+  - "generate" — analogical reasoning
+  - "score" — long-term PDC (raw model output before JSON parse)
+  - "predict" — final entity prediction (normalized text)
+
 Cache keys include LLM_PROVIDER and the active model id so different models
 do not share entries.
 """

@@ -31,6 +31,7 @@ On Colab you typically just export those env vars at the notebook level.
 Optional disk cache (repeatable experiments, fewer HF forward passes):
     LLM_CACHE_DIR=/path/to/dir
     Keys include LLM_PROVIDER and HF_MODEL_ID / OPENAI_MODEL / GROQ_MODEL.
+    Per-step opt-out: LLM_CACHE_PREDICT=0 (final predict_fn only).
 
 Long-term PDC scoring (`score_fn`) extras (Hugging Face):
     HF_SCORE_MAX_NEW_TOKENS=...     # optional floor; auto minimum scales with chunk size so JSON is not truncated
@@ -185,27 +186,43 @@ def score_fn(prompt: str, events: Sequence[Any]) -> List[float]:
     return scores
 
 
+def _normalize_predict_text(text: str) -> str:
+    """Strip model output to a single entity line (quotes, first line)."""
+    text = text.strip()
+    if len(text) >= 2 and (
+        (text[0] == '"' and text[-1] == '"')
+        or (text[0] == "'" and text[-1] == "'")
+    ):
+        text = text[1:-1].strip()
+    return text.splitlines()[0].strip()
+
+
 def predict_fn(prompt: str) -> str:
     """
     Final object prediction used by `predict_next_object`.
 
     The prediction prompt (`prompts/prediction_prompt.txt`) tells the model
     to return ONLY the predicted entity string.
+
+    Cached when LLM_CACHE_DIR is set (same mechanism as generate_fn / score_fn).
+    Set LLM_CACHE_PREDICT=0 to bypass cache for this step.
     """
+    use_cache = os.environ.get("LLM_CACHE_PREDICT", "1").strip().lower() in (
+        "1", "true", "yes", "on",
+    )
+    if use_cache:
+        cached = cache_get("predict", prompt)
+        if cached is not None:
+            return _normalize_predict_text(cached)
+
     out = call_llm(prompt)
     if not isinstance(out, str):
         out = str(out)
-    text = out.strip()
+    text = _normalize_predict_text(out)
 
-    # Remove surrounding quotes if any (some chat models quote JSON-style).
-    if len(text) >= 2 and (
-        (text[0] == '"' and text[-1] == '"')
-        or (text[0] == "'" and text[-1] == "'")
-    ):
-        text = text[1:-1].strip()
-
-    # Use first line as the entity.
-    return text.splitlines()[0].strip()
+    if use_cache:
+        cache_set("predict", prompt, text)
+    return text
 
 
 def predict_with_logprobs_fn(
