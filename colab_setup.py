@@ -30,7 +30,8 @@ test_prediction()
 
 Extras:
   - Disk cache: os.environ["LLM_CACHE_DIR"] = "/content/drive/MyDrive/llm_cache"
-  - Strict paper Oq only: os.environ["ADAPTIVE_CANDIDATES"] = "0"
+  - Strict paper Oq (no adaptive expansion): setup(..., adaptive_candidates=False)
+  - Fast smoke test (smaller context): setup(..., short_term_l=5, history_length=30)
 ────────────────────────────────────────────────────────────────────
 """
 
@@ -71,8 +72,9 @@ def setup(
     load_4bit: bool = True,
     max_tokens: int = 200,
     data_dir: str = DEFAULT_DATA_DIR,
-    short_term_l: int = 5,
-    history_length: int = 20,
+    short_term_l: int = 20,
+    history_length: int = 100,
+    adaptive_candidates: bool = True,
     verbose: bool = True,
 ) -> None:
     """Configure environment for HF local LLM inference.
@@ -82,8 +84,10 @@ def setup(
         load_4bit: Use 4-bit quantization (default True to prevent OOM)
         max_tokens: Max new tokens for generation (reduced from 256 to prevent OOM)
         data_dir: Dataset directory relative to repo root
-        short_term_l: Max short-term history events (reduced for speed/memory)
-        history_length: Max total history length (reduced for speed/memory)
+        short_term_l: Short-term chain length l (paper §6.1 default 20)
+        history_length: Dual-history target length L (paper §6.1 default 100)
+        adaptive_candidates: If True, expand to O²q when |Oq| is small (thesis
+            improvement; paper Table 2). If False, strict Oq only.
         verbose: Enable real-time logging
     """
     model_id = MODELS.get(model.lower(), model)
@@ -101,15 +105,20 @@ def setup(
     os.environ["SHORT_TERM_L"] = str(short_term_l)
     os.environ["HISTORY_LENGTH_L"] = str(history_length)
     os.environ["NUM_ANALOGICAL_EXAMPLES"] = "1"
-    os.environ["MIN_HISTORY_CONTEXTS"] = "20"
-    os.environ.setdefault("ADAPTIVE_CANDIDATES", "1")
+    # Paper §3.1: ≥300 historical contexts before similar-event timestamp.
+    os.environ.setdefault("MIN_HISTORY_CONTEXTS", "300")
+    os.environ["ADAPTIVE_CANDIDATES"] = "1" if adaptive_candidates else "0"
     os.environ.setdefault("ADAPTIVE_MIN_CANDIDATES", "3")
-    
+    os.environ.setdefault("DTF_ALPHA", "2.75")
+
     clear_gpu_memory()
     
     _log(f"[setup] model={model_id}")
     _log(f"[setup] 4bit={load_4bit}, max_tokens={max_tokens}")
-    _log(f"[setup] history: short_term={short_term_l}, total={history_length}")
+    _log(
+        f"[setup] history: short_term={short_term_l}, target_L={history_length} "
+        f"(paper §6.1); adaptive_O2={adaptive_candidates}"
+    )
     _log(f"[setup] data={data_dir}")
 
 
