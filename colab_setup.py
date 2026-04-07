@@ -126,6 +126,17 @@ def clear_gpu_memory() -> None:
         pass
 
 
+def clear_runtime_memory() -> None:
+    """Free Python heap and CUDA cache between Colab tests (same idea as end of ``test_prediction``).
+
+    One ``gc.collect()`` pass is often not enough after LLM / embedding forward passes;
+    pairing GC with ``empty_cache`` reduces RAM spikes when running ``test_quick`` back-to-back.
+    """
+    gc.collect()
+    clear_gpu_memory()
+    gc.collect()
+
+
 def setup(
     model: str = "qwen",
     load_4bit: bool = True,
@@ -366,7 +377,7 @@ def test_prediction(sample_size: int = 500, use_second_order: bool = False) -> s
     with _timer("clustering"):
         cluster_result = cluster_entities(entities)
     
-    clear_gpu_memory()
+    clear_runtime_memory()
 
     ctx = get_prediction_context(query, cluster_result, use_second_order)
     gt_norm = e.object.strip()
@@ -389,57 +400,65 @@ def test_prediction(sample_size: int = 500, use_second_order: bool = False) -> s
     _log(f"[test_prediction] predicted={pred}")
     _log(f"[test_prediction] ground_truth={e.object}")
     _log(f"[test_prediction] correct={pred == e.object}")
-    
-    clear_gpu_memory()
-    
+
+    clear_runtime_memory()
+
     return pred
 
 
 def test_quick() -> None:
-    """Run quick tests (1-3 + 4a). Total time: ~30-60s."""
+    """Run quick tests (1-3 + 4a). Total time: ~30-60s.
+
+    Calls :func:`clear_runtime_memory` after each sub-test (same pattern as
+    ``test_prediction``: avoid retaining activations / large tensors between steps).
+    """
+    clear_runtime_memory()
+
     _log("\n" + "=" * 50)
     _log("TEST 1: Basic LLM call")
     _log("=" * 50)
     test_llm()
-    clear_gpu_memory()
-    
+    clear_runtime_memory()
+
     _log("\n" + "=" * 50)
     _log("TEST 2: Analogical reasoning (paper §3.3)")
     _log("=" * 50)
     test_analogical(max_chars=3000)
-    clear_gpu_memory()
-    
+    clear_runtime_memory()
+
     _log("\n" + "=" * 50)
     _log("TEST 3: LLM scoring (paper §3.2 PDC)")
     _log("=" * 50)
     test_scoring(n=5)
-    clear_gpu_memory()
-    
+    clear_runtime_memory()
+
     _log("\n" + "=" * 50)
     _log("TEST 4: Quick prediction (synthetic data)")
     _log("=" * 50)
     test_prediction_quick()
-    clear_gpu_memory()
-    
+    clear_runtime_memory()
+
     _log("\n" + "=" * 50)
     _log("QUICK TESTS COMPLETED")
     _log("=" * 50)
     _log("\nTo run full prediction with clustering, use: test_prediction()")
 
+    clear_runtime_memory()
+
 
 def test_all() -> None:
     """Run all tests including full prediction. Total time: ~3-5 min."""
     test_quick()
-    
-    clear_gpu_memory()
+
+    clear_runtime_memory()
     
     _log("\n" + "=" * 50)
     _log("TEST 5: Full prediction (real data + clustering)")
     _log("=" * 50)
     test_prediction()
-    
-    clear_gpu_memory()
-    
+
+    clear_runtime_memory()
+
     _log("\n" + "=" * 50)
     _log("ALL TESTS COMPLETED")
     _log("=" * 50)
