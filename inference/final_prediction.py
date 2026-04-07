@@ -34,6 +34,7 @@ from __future__ import annotations
 import importlib
 import json
 import os
+import re
 from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
@@ -110,27 +111,71 @@ def _verbalize_query_masked(s: str, r: str, t: str) -> str:
 
 
 def _extract_predicted_object(llm_output: str, candidates: Sequence[str]) -> str:
-    """Extract the predicted entity from LLM output."""
+    """Extract the predicted entity from LLM output.
+
+    Paper §3.3: the model should output the **index** (1..|Oq|) of the answer.
+    Prefer parsing that index before any substring heuristic — the old
+    "first candidate substring found in text" rule breaks when the model
+    outputs a long rationale that mentions several entities.
+    """
     out = llm_output.strip()
     if not candidates:
         return out
 
-    for c in candidates:
-        if c and c in out:
+    cand_list = [c for c in candidates if c]
+    n = len(cand_list)
+    if n == 0:
+        return out
+
+    def _index_from_match(m: re.Match[str]) -> int | None:
+        idx = int(m.group(1))
+        if 1 <= idx <= n:
+            return idx
+        return None
+
+    # 1) Leading number on any line (e.g. "42" or "Answer: 17")
+    for line in out.splitlines():
+        line = line.strip()
+        m = re.match(r"^(\d{1,8})\b", line)
+        if m:
+            ix = _index_from_match(m)
+            if ix is not None:
+                return cand_list[ix - 1]
+        m2 = re.search(
+            r"(?:choice|answer|number)\s*[:is.]+\s*(\d{1,8})\b",
+            line,
+            re.IGNORECASE,
+        )
+        if m2:
+            ix = _index_from_match(m2)
+            if ix is not None:
+                return cand_list[ix - 1]
+
+    # 2) Exact first line == entity name
+    first_line = out.splitlines()[0].strip() if out else ""
+    for c in cand_list:
+        if first_line == c:
             return c
 
+    # 3) JSON
     try:
         maybe = json.loads(out)
-        if isinstance(maybe, str):
+        if isinstance(maybe, str) and maybe in cand_list:
             return maybe
+        if isinstance(maybe, int) and 1 <= maybe <= n:
+            return cand_list[maybe - 1]
     except Exception:
         pass
 
-    first = out.splitlines()[0].strip()
-    for c in candidates:
-        if first == c:
-            return c
-    return first
+    # 4) Longest substring match (avoids picking a short name that appears inside others)
+    best = ""
+    for c in sorted(cand_list, key=len, reverse=True):
+        if c in out and len(c) > len(best):
+            best = c
+    if best:
+        return best
+
+    return first_line or out
 
 
 @dataclass
@@ -305,8 +350,14 @@ def predict_next_object(
     )
     
     use_logprobs = _env_truthy("USE_LOGPROB_PREDICTION", default=True)
-    
-    if use_logprobs and ctx.candidate_set:
+    max_lp_raw = os.environ.get("MAX_LOGPROB_CANDIDATES", "512").strip()
+    max_logprob_candidates = int(max_lp_raw) if max_lp_raw.isdigit() else 512
+
+    if (
+        use_logprobs
+        and ctx.candidate_set
+        and len(ctx.candidate_set) <= max_logprob_candidates
+    ):
         try:
             predictor_logprobs = _load_callable_from_env("LLM_PREDICTOR_LOGPROBS")
             predicted, _ = predictor_logprobs(ctx.final_prompt, ctx.candidate_set)
@@ -372,7 +423,10 @@ def predict_next_object_with_probs(
         query_event, cluster_result, use_second_order_candidates
     )
     
-    if ctx.candidate_set:
+    max_lp_raw = os.environ.get("MAX_LOGPROB_CANDIDATES", "512").strip()
+    max_logprob_candidates = int(max_lp_raw) if max_lp_raw.isdigit() else 512
+
+    if ctx.candidate_set and len(ctx.candidate_set) <= max_logprob_candidates:
         try:
             predictor_logprobs = _load_callable_from_env("LLM_PREDICTOR_LOGPROBS")
             predicted, probabilities = predictor_logprobs(
