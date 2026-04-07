@@ -19,4 +19,4 @@ w/o long-term, w/o short-term, w/o analogical (bạn đã có cấu trúc để 
 
 Prediction §3.3 (đã chỉnh trong code)
 - Parse số chỉ mục 1..|Oq| trước khi khớp substring; ưu tiên dòng cuối / “answer is …” / ``[k]``; tránh chọn nhầm khi LLM sinh đoạn dài nhắc nhiều entity.
-- Giới hạn logprob path khi |Oq| rất lớn: env ``MAX_LOGPROB_CANDIDATES`` (mặc định 512), còn lại dùng generate + parse số.
+- Giới hạn logprob path khi |Oq| rất lớn: env ``MAX_LOGPROB_CANDIDATES`` (mặc định 8192 để khớp Oq ~5k ICEWS), còn lại dùng generate + parse số. Substring fallback tắt mặc định (bật bằng ``PREDICT_USE_SUBSTRING_FALLBACK=1``).

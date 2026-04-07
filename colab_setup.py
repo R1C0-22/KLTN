@@ -165,6 +165,8 @@ def setup(
     # print a short rationale + the index (paper §3.3). Overrides HF_MAX_NEW_TOKENS
     # only inside ``predict_fn`` (see llm/cloud_adapter.py).
     os.environ.setdefault("HF_PREDICT_MAX_NEW_TOKENS", str(max(128, min(512, max_tokens * 2))))
+    # Large |Oq| on ICEWS: must use paper §3.3 logprob path, not generate+substring.
+    os.environ.setdefault("MAX_LOGPROB_CANDIDATES", "8192")
     os.environ["TKG_DATA_DIR"] = os.path.join(REPO_ROOT, data_dir)
     os.environ["LLM_SCORE_PARSE_FALLBACK"] = "1"
     os.environ.setdefault("HF_SCORE_MAX_NEW_TOKENS", "256")
