@@ -1,6 +1,8 @@
 data/
-CHAT_SUMMARY.md
-REQUESTS.MD
-output.txt
 __pycache__/
+CHAT_SUMMARY.md
+COLAB_SETUP.md
+REQUESTS.MD
+IMPROVE.MD
+output.txt
 *.pyc
