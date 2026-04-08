@@ -96,9 +96,10 @@ def _should_use_logprob_prediction() -> bool:
 
 def _max_logprob_candidates_default() -> int:
     """Provider-aware default candidate cap for logprob path."""
-    # Local HF logprob path is much heavier than API top-logprob APIs.
-    if _llm_provider() in ("hf", "huggingface", "local", "transformers"):
-        return 64
+    # Paper §3.3 expects probability ranking across Oq by candidate indices.
+    # A too-small cap silently falls back to generation+parsing for large Oq,
+    # which makes Hit@k less faithful to the paper. Keep a practical default
+    # cap of 512 for all providers; override via MAX_LOGPROB_CANDIDATES if needed.
     return 512
 
 

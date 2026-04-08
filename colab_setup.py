@@ -499,7 +499,11 @@ def test_prediction_metrics(
     if n_valid == 0:
         raise RuntimeError(f"No validation quadruples in {data_dir}")
 
-    end = min(start_index + max(1, n_queries), n_valid)
+    # n_queries <= 0 means "run all remaining validation queries".
+    if n_queries <= 0:
+        end = n_valid
+    else:
+        end = min(start_index + n_queries, n_valid)
     if start_index < 0 or start_index >= n_valid:
         raise ValueError(f"start_index must be in [0, {n_valid - 1}], got {start_index}")
 
@@ -515,7 +519,14 @@ def test_prediction_metrics(
 
         random.seed(42)
         sampled = random.sample(entities, sample_size)
-        for probe in (anchor.subject, anchor.object):
+        # Keep all entities that appear in the evaluation window so clustering
+        # quality is not biased toward only the first query.
+        required_entities = {anchor.subject, anchor.object}
+        for ev in valid_data[start_index:end]:
+            required_entities.add(ev.subject)
+            required_entities.add(ev.object)
+
+        for probe in required_entities:
             if probe not in sampled:
                 sampled.append(probe)
         entities = sorted(sampled)
