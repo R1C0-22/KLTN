@@ -75,6 +75,40 @@ def _env_truthy(name: str, default: bool = False) -> bool:
     return v in ("1", "true", "yes", "on")
 
 
+def _llm_provider() -> str:
+    """Return normalized LLM provider name."""
+    return (os.environ.get("LLM_PROVIDER") or "openai").strip().lower()
+
+
+def _should_use_logprob_prediction() -> bool:
+    """Decide whether to use logprob-based prediction.
+
+    - If `USE_LOGPROB_PREDICTION` is explicitly set, honor it.
+    - Otherwise default to:
+      - True for cloud APIs (OpenAI/Groq), matching paper §3.3
+      - False for local HF on Colab to avoid very slow per-candidate forwards
+    """
+    raw = os.environ.get("USE_LOGPROB_PREDICTION", "").strip()
+    if raw:
+        return raw.lower() in ("1", "true", "yes", "on")
+    return _llm_provider() in ("openai", "groq")
+
+
+def _max_logprob_candidates_default() -> int:
+    """Provider-aware default candidate cap for logprob path."""
+    # Local HF logprob path is much heavier than API top-logprob APIs.
+    if _llm_provider() in ("hf", "huggingface", "local", "transformers"):
+        return 64
+    return 512
+
+
+def _max_logprob_candidates() -> int:
+    raw = os.environ.get("MAX_LOGPROB_CANDIDATES", "").strip()
+    if raw.isdigit():
+        return int(raw)
+    return _max_logprob_candidates_default()
+
+
 def _default_train_data_dir() -> str | None:
     """If `data/ICEWS05-15` exists under the repo root, use it as a smoke-test default."""
     candidate = Path(__file__).resolve().parents[1] / "data" / "ICEWS05-15"
@@ -394,9 +428,8 @@ def predict_next_object(
         query_event, cluster_result, use_second_order_candidates
     )
     
-    use_logprobs = _env_truthy("USE_LOGPROB_PREDICTION", default=True)
-    max_lp_raw = os.environ.get("MAX_LOGPROB_CANDIDATES", "512").strip()
-    max_logprob_candidates = int(max_lp_raw) if max_lp_raw.isdigit() else 512
+    use_logprobs = _should_use_logprob_prediction()
+    max_logprob_candidates = _max_logprob_candidates()
 
     if (
         use_logprobs
@@ -468,8 +501,7 @@ def predict_next_object_with_probs(
         query_event, cluster_result, use_second_order_candidates
     )
     
-    max_lp_raw = os.environ.get("MAX_LOGPROB_CANDIDATES", "512").strip()
-    max_logprob_candidates = int(max_lp_raw) if max_lp_raw.isdigit() else 512
+    max_logprob_candidates = _max_logprob_candidates()
 
     if ctx.candidate_set and len(ctx.candidate_set) <= max_logprob_candidates:
         try:
