@@ -16,6 +16,7 @@ Colab **L4** is an NVIDIA **GPU**, not a CPU. Free-tier runtimes often assign **
 | TEST 3 `scores=[..., ...]` with variance | PDC path OK (JSON logits parsed). All zeros ⇒ check raw output via `debug_scoring_raw()`. |
 | TEST 4 `predicted=India` on synthetic | **No ground-truth label** in toy history — success = pipeline finished; compare to `e.object` only in `test_prediction()` on real `valid`. |
 | BERT `UNEXPECTED position_ids` | Harmless for `bert-base-nli-mean-tokens` cross-load (see note below). |
+| `test_prediction` `correct=False` | **Not a pipeline bug by itself.** TKGF is evaluated with **MRR / Hits@k** over many test queries; a single miss (pred ≠ `e.object`) is expected. If *most* queries miss, check PDC scores, candidate set (`ground_truth_in_candidate_set`), and HF logprob scoring (`HF_LOGPROB_FAST` — default full-label sum in `llm/unified.py`). |
 
 ### How to read `test_quick()` output
 
@@ -155,6 +156,44 @@ debug_scoring_raw(n=3)  # See raw LLM output for scoring
 | `AttributeError: module 'torch' has no attribute 'device'` | Broken/partial torch upgrade. **Restart runtime**. Remove `pip install -U torch` from Cell 1; use Colab’s torch or install matching `torch`+`torchvision`+`torchaudio` from pytorch.org. `colab_setup.setup()` now calls `verify_torch_install()` with a clearer message. |
 | Very slow PDC scoring | Defaults: `HF_SCORE_MAX_NEW_TOKENS=256`, `LLM_SCORE_CHUNK_SIZE=24` (set in `setup()`) |
 
+### Cell: paper-style Hit@1 on first *N* valid queries (not one-shot)
+
+`test_prediction()` compares **one** `valid[0]` query. For a defensible thesis metric, average over many queries:
+
+```python
+import os, sys
+os.chdir("/content/KLTN")
+sys.path.insert(0, "/content/KLTN")
+
+from colab_setup import setup
+from preprocessing import load_dataset
+from inference.final_prediction import predict_next_object, get_prediction_context
+from clustering.entity_cluster import cluster_entities, extract_entities
+
+setup("llama", load_4bit=True, max_tokens=256, short_term_l=20, history_length=100, adaptive_candidates=True)
+os.environ.setdefault("MIN_HISTORY_CONTEXTS", "300")
+
+data_dir = os.environ["TKG_DATA_DIR"]
+train = load_dataset(data_dir, splits=["train"])
+valid = load_dataset(data_dir, splits=["valid"])
+entities = extract_entities(train)
+# cap clustering for speed (same idea as test_prediction sample_size)
+cluster_result = cluster_entities(entities[:500] if len(entities) > 500 else entities)
+
+N = 20
+hits = 0
+for i in range(min(N, len(valid))):
+    e = valid[i]
+    q = (e.subject, e.relation, "?", e.timestamp)
+    ctx = get_prediction_context(q, cluster_result, use_second_order=False)
+    if e.object.strip() not in {c.strip() for c in ctx.candidate_set}:
+        continue  # skip impossible Hit@1
+    pred = predict_next_object(q, cluster_result, use_second_order=False)
+    if pred.strip() == e.object.strip():
+        hits += 1
+print(f"Hit@1 (approx, {N} tries): {hits}/{min(N, len(valid))}")
+```
+
 ---
 
 ## Model Options
@@ -174,6 +213,7 @@ debug_scoring_raw(n=3)  # See raw LLM output for scoring
 | `HF_MODEL_ID` | HuggingFace model | - |
 | `HF_LOAD_IN_4BIT` | 4-bit quantization | `1` (on) |
 | `HF_MAX_NEW_TOKENS` | Max generation length | `256` |
+| `HF_LOGPROB_FAST` | HF only: `1` = first-subword logprob (fast, inaccurate for `1` vs `10`); default full label | `0` |
 | `TKG_DATA_DIR` | Dataset directory | `data/ICEWS05-15` |
 | `SHORT_TERM_L` | Short-term history limit | `10` |
 | `HISTORY_LENGTH_L` | Total history limit | `50` |

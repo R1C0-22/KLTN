@@ -37,6 +37,7 @@ For Hugging Face local (Colab GPU — download weights, matches paper model fami
     HF_TRUST_REMOTE_CODE=0           # set 1 only if the model card asks for it
     HF_MAX_INPUT_TOKENS=...          # optional cap on *prompt* tokens (truncate); avoids HF crashes on long PDC prompts
     HF_CLEAR_GPU_CACHE=0             # default off — empty_cache every gen is slow; set 1 only if OOM
+    HF_LOGPROB_FAST=0                # 1 = legacy first-subword logprob only (fast, can confuse 1 vs 10)
 
     pip install torch transformers accelerate bitsandbytes
 
@@ -535,8 +536,44 @@ def _logprobs_groq(prompt: str, candidate_labels: list[str]) -> list[float]:
     return logprob_scores
 
 
+def _logprobs_huggingface_first_token_only(
+    model: Any,
+    tokenizer: Any,
+    input_ids: Any,
+    attention_mask: Any | None,
+    candidate_labels: list[str],
+) -> list[float]:
+    """Legacy: score each label by log p(first subword | prompt). Fast but wrong when
+    labels share the same first token (e.g. ``\"1\"`` vs ``\"10\"`` vs ``\"100\"``).
+    Set ``HF_LOGPROB_FAST=1`` to use this path.
+    """
+    import torch
+
+    with torch.no_grad():
+        outputs = model(input_ids, attention_mask=attention_mask)
+        next_token_logits = outputs.logits[0, -1, :].cpu()
+
+    logprob_scores: list[float] = []
+    for label in candidate_labels:
+        label_tokens = tokenizer.encode(label, add_special_tokens=False)
+        if label_tokens:
+            logprob_scores.append(next_token_logits[label_tokens[0]].item())
+        else:
+            logprob_scores.append(-100.0)
+    del outputs, next_token_logits
+    return logprob_scores
+
+
 def _logprobs_huggingface(prompt: str, candidate_labels: list[str]) -> list[float]:
-    """Get logprobs from HuggingFace model using forward pass (paper §3.3, §2.2)."""
+    """Get logprobs from HuggingFace model (paper §3.3, §2.2).
+
+    Default: sum log-probabilities for **all** subword tokens of each numeric label
+    ``\"1\"``..``\"N\"`` as a continuation after the prompt (teacher-forcing). This
+    avoids the collision where ``\"1\"``, ``\"10\"``, ``\"11\"`` share the same first
+    token under BPE — a common cause of wrong argmax when only the first token was used.
+
+    Fast path (less accurate): ``HF_LOGPROB_FAST=1`` uses only the first subword.
+    """
     global _hf_model, _hf_tokenizer
     import gc
 
@@ -551,13 +588,11 @@ def _logprobs_huggingface(prompt: str, candidate_labels: list[str]) -> list[floa
 
     model = _hf_model
     tokenizer = _hf_tokenizer
-    
-    # Config
+
     cfg = model.config
     model_ctx = getattr(cfg, "max_position_embeddings", None) or getattr(cfg, "n_positions", 8192)
     input_cap = max(256, model_ctx - 64)
 
-    # Tokenize
     messages = [{"role": "user", "content": prompt}]
     if getattr(tokenizer, "chat_template", None):
         prompt_text = tokenizer.apply_chat_template(messages, add_generation_prompt=True, tokenize=False)
@@ -566,31 +601,58 @@ def _logprobs_huggingface(prompt: str, candidate_labels: list[str]) -> list[floa
 
     enc = tokenizer(prompt_text, return_tensors="pt", truncation=True, max_length=input_cap)
     device = next(model.parameters()).device
-    input_ids = enc["input_ids"].to(device)
-    attention_mask = enc.get("attention_mask")
-    if attention_mask is not None:
-        attention_mask = attention_mask.to(device)
+    base_input_ids = enc["input_ids"].to(device)
+    base_attention_mask = enc.get("attention_mask")
+    if base_attention_mask is not None:
+        base_attention_mask = base_attention_mask.to(device)
 
     try:
-        with torch.no_grad():
-            outputs = model(input_ids, attention_mask=attention_mask)
-            next_token_logits = outputs.logits[0, -1, :].cpu()
-        
-        # Extract logprobs for each candidate label
-        logprob_scores = []
+        if _env_truthy("HF_LOGPROB_FAST", False):
+            return _logprobs_huggingface_first_token_only(
+                model, tokenizer, base_input_ids, base_attention_mask, candidate_labels
+            )
+
+        logprob_scores: list[float] = []
         for label in candidate_labels:
-            label_tokens = tokenizer.encode(label, add_special_tokens=False)
-            if label_tokens:
-                logprob_scores.append(next_token_logits[label_tokens[0]].item())
+            cont_ids = tokenizer.encode(label, add_special_tokens=False)
+            if not cont_ids:
+                logprob_scores.append(-1e9)
+                continue
+
+            cur_ids = base_input_ids.clone()
+            if base_attention_mask is not None:
+                cur_mask = base_attention_mask.clone()
             else:
-                logprob_scores.append(-100.0)
+                cur_mask = torch.ones_like(cur_ids, dtype=torch.long, device=device)
+
+            total = 0.0
+            for tid in cont_ids:
+                tid_int = int(tid)
+                with torch.no_grad():
+                    out = model(cur_ids, attention_mask=cur_mask)
+                    logp = torch.log_softmax(out.logits[0, -1], dim=-1)
+                if tid_int >= logp.shape[0]:
+                    total = -1e9
+                    del out
+                    break
+                total += logp[tid_int].item()
+                del out
+
+                nxt = torch.tensor([[tid_int]], device=device, dtype=cur_ids.dtype)
+                cur_ids = torch.cat([cur_ids, nxt], dim=1)
+                cur_mask = torch.cat(
+                    [cur_mask, torch.ones((1, 1), device=device, dtype=cur_mask.dtype)],
+                    dim=1,
+                )
+
+            logprob_scores.append(total)
+
+        return logprob_scores
     finally:
-        del input_ids, attention_mask, enc, outputs, next_token_logits
+        del base_input_ids, base_attention_mask, enc
         gc.collect()
         if _env_truthy("HF_CLEAR_GPU_CACHE", False):
             _clear_gpu_cache()
-
-    return logprob_scores
 
 
 if __name__ == "__main__":

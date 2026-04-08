@@ -515,6 +515,13 @@ def test_prediction(sample_size: int = 500, use_second_order: bool = False) -> s
     _log(f"[test_prediction] predicted={pred}")
     _log(f"[test_prediction] ground_truth={e.object}")
     _log(f"[test_prediction] correct={pred == e.object}")
+    if pred != e.object:
+        _log(
+            "[test_prediction] NOTE: Hit@1 miss on one query is normal for TKGF; "
+            "paper reports MRR / Hits@k over many queries. "
+            "If many misses: check PDC scores (test_scoring), HF logprob path "
+            "(HF_LOGPROB_FAST=0 default in llm/unified.py), or run more valid samples."
+        )
     
     clear_gpu_memory()
     
