@@ -160,6 +160,44 @@ def clear_gpu_memory() -> None:
         pass
 
 
+def verify_torch_install() -> None:
+    """Fail fast if PyTorch is broken or shadowed (common after bad pip upgrades on Colab).
+
+    Symptom: ``AttributeError: module 'torch' has no attribute 'device'`` inside
+    ``transformers``/``accelerate`` when loading models — usually means ``torch`` was
+    upgraded inconsistently with torchvision/torchaudio, or the runtime needs a restart.
+    """
+    import importlib
+
+    t = importlib.import_module("torch")
+    tf = getattr(t, "__file__", "") or ""
+
+    # Real wheels load from site-packages/dist-packages; a local ``torch.py`` shadows PyTorch.
+    if tf and "site-packages" not in tf and "dist-packages" not in tf:
+        raise RuntimeError(
+            f"``torch`` imported from unexpected path: {tf}\n"
+            "Remove/rename any file named ``torch.py`` in the project cwd or sys.path."
+        )
+
+    if not hasattr(t, "device"):
+        raise RuntimeError(
+            "PyTorch looks broken: ``torch`` has no attribute ``device``.\n\n"
+            "Typical Colab fixes (in order):\n"
+            "  1) Runtime → Restart session (pip upgrades often need this).\n"
+            "  2) Do **not** run ``pip install -U torch`` alone — it can mismatch torchvision/torchaudio.\n"
+            "     Prefer Colab's preinstalled torch, or install a **matching trio** from pytorch.org "
+            "(same CUDA build).\n"
+            "  3) Re-run deps **without** upgrading torch:\n"
+            "     ``pip install -q 'numpy>=1.26,<2.1' bitsandbytes transformers accelerate ...``\n"
+            "See ``COLAB_SETUP.md`` Cell 1 for the recommended one-liners."
+        )
+
+    if not hasattr(t, "cuda"):
+        raise RuntimeError("PyTorch install incomplete: ``torch`` has no attribute ``cuda``.")
+
+    _log(f"[torch] version={getattr(t, '__version__', '?')} file={tf or '?'}")
+
+
 def setup(
     model: str = "qwen",
     load_4bit: bool = True,
@@ -190,6 +228,8 @@ def setup(
             pass
 
     _ensure_bitsandbytes_for_4bit(load_4bit)
+
+    verify_torch_install()
 
     model_id = MODELS.get(model.lower(), model)
 

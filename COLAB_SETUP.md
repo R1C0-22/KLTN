@@ -30,26 +30,31 @@ test_quick()
 ### Cell 1: Clone and Install
 `load_4bit=True` (default in `setup()`) **requires `bitsandbytes`**. If you skip install or run `setup()` before install, you get `ImportError: ... bitsandbytes ...`. Install first, then restart.
 
+**Do not** run `pip install -U torch` by itself. Colab ships PyTorch + CUDA builds; upgrading only `torch` often breaks `torchvision` / `torchaudio` and can leave `torch` in a half-upgraded state (`AttributeError: module 'torch' has no attribute 'device'`). Prefer keeping Colab’s torch unless you install a **matching** trio from [pytorch.org](https://pytorch.org/get-started/locally/).
+
 ```python
 # Mount Drive (optional - cache HF models)
 from google.colab import drive, userdata
-drive.mount('/content/drive')
+drive.mount("/content/drive")
 
 import os
+os.environ["LLM_CACHE_DIR"] = "/content/drive/MyDrive/llm_cache"
 os.environ["HF_HOME"] = "/content/drive/MyDrive/hf_cache"
-os.environ["HF_TOKEN"] = userdata.get("HF_TOKEN")  # for gated Llama
+os.environ["HF_TOKEN"] = userdata.get("HF_TOKEN")  # gated Llama only
 
-# Clone repo + copy data
-!cd /content && rm -rf KLTN && git clone https://github.com/R1C0-22/KLTN.git
-!cp -r /content/drive/MyDrive/data /content/KLTN/  # if data on Drive
+# Repo + data (idempotent: pull if repo exists, else clone)
+!cd /content && (test -d KLTN/.git && git -C KLTN pull --ff-only || test ! -d KLTN && git clone https://github.com/R1C0-22/KLTN.git || echo "Fix /content/KLTN manually")
 
-# Install dependencies — bitsandbytes MUST be present before setup(load_4bit=True)
-# IMPORTANT: pin numpy <2.1 first. Unpinned ``-U numpy`` can install 2.4+ and break
-# scipy/sklearn on Colab, then transformers fails to import (GenerationMixin / AutoModelForCausalLM).
+# Copy dataset from Drive if present
+!test -d /content/drive/MyDrive/data && cp -r /content/drive/MyDrive/data /content/KLTN/ || true
+
+# Dependencies: numpy pin first, then ML stack — **omit torch** (use Colab default)
 !python -m pip install -q -U pip
 !python -m pip install -q -U "numpy>=1.26,<2.1"
 !python -m pip install -q -U "bitsandbytes>=0.46.1" transformers accelerate sentence-transformers scikit-learn
 ```
+
+Pip may print **dependency conflict warnings** (e.g. RAPIDS `libcuvs` vs CUDA 13). Those are often harmless if your imports work; if `import torch` fails, **restart runtime** and avoid upgrading unrelated CUDA stacks in the same session.
 
 **After this cell: Runtime → Restart session**, then run Cell 2.
 
@@ -113,6 +118,7 @@ debug_scoring_raw(n=3)  # See raw LLM output for scoring
 | Prediction ≠ ground truth but `ground_truth_in_candidate_set=False` | Expected: expand candidates with `test_prediction(use_second_order=True)` or lower `MIN_HISTORY_CONTEXTS` |
 | `temperature` / `top_p` ignored warnings | Fixed in `llm/unified.py` via explicit `GenerationConfig`; `git pull` |
 | `numpy._core... _blas_supports_fpe` / `ModuleNotFoundError: GenerationMixin` / `AutoModelForCausalLM` | Caused by numpy 2.4+ breaking scipy/sklearn. Fix: `pip install "numpy>=1.26,<2.1"` then **Restart runtime**, re-run pip + `test_quick()` |
+| `AttributeError: module 'torch' has no attribute 'device'` | Broken/partial torch upgrade. **Restart runtime**. Remove `pip install -U torch` from Cell 1; use Colab’s torch or install matching `torch`+`torchvision`+`torchaudio` from pytorch.org. `colab_setup.setup()` now calls `verify_torch_install()` with a clearer message. |
 | Very slow PDC scoring | Defaults: `HF_SCORE_MAX_NEW_TOKENS=256`, `LLM_SCORE_CHUNK_SIZE=24` (set in `setup()`) |
 
 ---
