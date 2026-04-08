@@ -119,28 +119,36 @@ def pip_install_colab_deps(extra: list[str] | None = None) -> None:
 
 
 def bitsandbytes_available() -> bool:
-    """True if bitsandbytes is importable (required for HF 4-bit load)."""
+    """True if bitsandbytes can be imported and initialized (required for HF 4-bit load).
+
+    On some Colab images, ``import bitsandbytes`` raises ``RuntimeError`` (e.g. duplicate
+    kernel registration with a mismatched torch) — that must be treated as *unavailable*,
+    not as a hard crash inside ``setup()``.
+    """
     try:
         import bitsandbytes  # noqa: F401
         return True
-    except ImportError:
+    except Exception:
         return False
 
 
-def _ensure_bitsandbytes_for_4bit(load_4bit: bool) -> None:
-    """Fail fast with a clear Colab fix if 4-bit is requested but bnb is missing."""
-    if not load_4bit:
-        return
+def _resolve_load_4bit(requested_4bit: bool) -> bool:
+    """Return whether we actually use 4-bit quantization.
+
+    If ``requested_4bit`` but bitsandbytes is missing or broken, log once and fall back
+    to FP16/BF16 (L4/A100 usually have enough VRAM for 7B/8B instruct models).
+    """
+    if not requested_4bit:
+        return False
     if bitsandbytes_available():
-        return
-    raise RuntimeError(
-        "bitsandbytes is not installed but setup(..., load_4bit=True) was used.\n\n"
-        "Fix (recommended): in a Colab cell run:\n"
-        "  !python -m pip install -q -U 'bitsandbytes>=0.46.1'\n"
-        "Then: Runtime → Restart session, import colab_setup again, and run setup().\n\n"
-        "Alternative (large GPU only, e.g. L4/A100): use FP16 without quantization:\n"
-        "  setup('llama', load_4bit=False)\n"
+        return True
+    _log(
+        "[setup] bitsandbytes missing or broken (ImportError or RuntimeError on import). "
+        "Common on Colab after partial torch/bnb upgrades. Falling back to FP16/BF16 "
+        "(set load_4bit=False explicitly to silence this). "
+        "To fix 4-bit: pip install a matching bitsandbytes, then Runtime → Restart session."
     )
+    return False
 
 
 def _log(msg: str) -> None:
@@ -241,15 +249,15 @@ def setup(
         except OSError:
             pass
 
-    _ensure_bitsandbytes_for_4bit(load_4bit)
-
     verify_torch_install()
 
     model_id = MODELS.get(model.lower(), model)
 
+    effective_4bit = _resolve_load_4bit(load_4bit)
+
     os.environ["LLM_PROVIDER"] = "hf"
     os.environ["HF_MODEL_ID"] = model_id
-    os.environ["HF_LOAD_IN_4BIT"] = "1" if load_4bit else "0"
+    os.environ["HF_LOAD_IN_4BIT"] = "1" if effective_4bit else "0"
     os.environ["HF_MAX_NEW_TOKENS"] = str(max_tokens)
     # Final prediction: allow a bit more than generic max_tokens so the model can
     # print a short rationale + the index (paper §3.3). Overrides HF_MAX_NEW_TOKENS
@@ -287,7 +295,9 @@ def setup(
     clear_gpu_memory()
     
     _log(f"[setup] model={model_id}")
-    _log(f"[setup] 4bit={load_4bit}, max_tokens={max_tokens}")
+    _log(
+        f"[setup] 4bit_requested={load_4bit} 4bit_effective={effective_4bit}, max_tokens={max_tokens}"
+    )
     _log(
         f"[setup] history: short_term={short_term_l}, target_L={history_length} "
         f"(paper §6.1); adaptive_O2={adaptive_candidates}"

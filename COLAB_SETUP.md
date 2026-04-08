@@ -60,7 +60,7 @@ test_quick()
 **Is the run “correct”?** For smoke: yes if TEST 1 prints text, TEST 3 scores are not all zeros, TEST 4 finishes. `MIN_HISTORY_CONTEXTS=0` is **not** paper-faithful for §3.1 filtering; use `300` when comparing to AnRe. TEST 4 synthetic `predicted=India` has **no gold label** — only proves the pipeline runs; use `test_prediction()` on real `valid` for Hit@1-style checks.
 
 ### Cell 1: Clone and Install
-`load_4bit=True` (default in `setup()`) **requires `bitsandbytes`**. If you skip install or run `setup()` before install, you get `ImportError: ... bitsandbytes ...`. Install first, then restart.
+`load_4bit=True` (default in `setup()`) **requires a working `bitsandbytes`**. If install is missing you get `ImportError`. If PyTorch and bitsandbytes versions conflict, `import bitsandbytes` can raise `RuntimeError` (e.g. duplicate kernel registration). In that case `setup()` **falls back to FP16/BF16** automatically (fine on **L4 / A100**; on **T4** you may need 4-bit or a smaller model). To force FP16: `setup("llama", load_4bit=False)`.
 
 **Do not** run `pip install -U torch` by itself. Colab ships PyTorch + CUDA builds; upgrading only `torch` often breaks `torchvision` / `torchaudio` and can leave `torch` in a half-upgraded state (`AttributeError: module 'torch' has no attribute 'device'`). Prefer keeping Colab’s torch unless you install a **matching** trio from [pytorch.org](https://pytorch.org/get-started/locally/).
 
