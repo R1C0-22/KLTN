@@ -109,6 +109,31 @@ def pip_install_colab_deps(extra: list[str] | None = None) -> None:
     )
 
 
+def bitsandbytes_available() -> bool:
+    """True if bitsandbytes is importable (required for HF 4-bit load)."""
+    try:
+        import bitsandbytes  # noqa: F401
+        return True
+    except ImportError:
+        return False
+
+
+def _ensure_bitsandbytes_for_4bit(load_4bit: bool) -> None:
+    """Fail fast with a clear Colab fix if 4-bit is requested but bnb is missing."""
+    if not load_4bit:
+        return
+    if bitsandbytes_available():
+        return
+    raise RuntimeError(
+        "bitsandbytes is not installed but setup(..., load_4bit=True) was used.\n\n"
+        "Fix (recommended): in a Colab cell run:\n"
+        "  !python -m pip install -q -U 'bitsandbytes>=0.46.1'\n"
+        "Then: Runtime → Restart session, import colab_setup again, and run setup().\n\n"
+        "Alternative (large GPU only, e.g. L4/A100): use FP16 without quantization:\n"
+        "  setup('llama', load_4bit=False)\n"
+    )
+
+
 def _log(msg: str) -> None:
     """Print with flush for real-time output in Colab."""
     print(msg, flush=True)
@@ -154,6 +179,8 @@ def setup(
             os.chdir(REPO_ROOT)
         except OSError:
             pass
+
+    _ensure_bitsandbytes_for_4bit(load_4bit)
 
     model_id = MODELS.get(model.lower(), model)
 

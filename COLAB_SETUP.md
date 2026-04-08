@@ -28,6 +28,8 @@ test_quick()
 ```
 
 ### Cell 1: Clone and Install
+`load_4bit=True` (default in `setup()`) **requires `bitsandbytes`**. If you skip install or run `setup()` before install, you get `ImportError: ... bitsandbytes ...`. Install first, then restart.
+
 ```python
 # Mount Drive (optional - cache HF models)
 from google.colab import drive, userdata
@@ -41,11 +43,14 @@ os.environ["HF_TOKEN"] = userdata.get("HF_TOKEN")  # for gated Llama
 !cd /content && rm -rf KLTN && git clone https://github.com/R1C0-22/KLTN.git
 !cp -r /content/drive/MyDrive/data /content/KLTN/  # if data on Drive
 
-# Install dependencies (DO NOT pin numpy!)
-!pip install -q transformers accelerate bitsandbytes sentence-transformers scikit-learn
+# Install dependencies — bitsandbytes MUST be present before setup(load_4bit=True)
+!python -m pip install -q -U pip
+!python -m pip install -q -U "bitsandbytes>=0.46.1" transformers accelerate sentence-transformers scikit-learn numpy
 ```
 
-**After this cell: Runtime → Restart session**
+**After this cell: Runtime → Restart session**, then run Cell 2.
+
+**No restart + no bitsandbytes:** use `setup("llama", load_4bit=False)` (FP16; needs enough VRAM, e.g. L4/A100).
 
 ### Cell 2: Quick Test (~30-60s)
 ```python
@@ -97,6 +102,7 @@ debug_scoring_raw(n=3)  # See raw LLM output for scoring
 | Error | Fix |
 |-------|-----|
 | `Unsupported LLM_PROVIDER='hf'` | `git pull` + restart runtime |
+| `ImportError: ... bitsandbytes ...` (4-bit) | Run `!pip install -U 'bitsandbytes>=0.46.1'` then **Restart session**, or `setup(..., load_4bit=False)` |
 | `OPENAI_API_KEY is not set` | Set `LLM_PROVIDER=hf` |
 | `Could not infer dtype` | `git pull` + restart runtime |
 | Test 4 hangs at "Batches" | Use `test_prediction_quick()` or wait for clustering |
