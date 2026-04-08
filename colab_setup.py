@@ -305,6 +305,19 @@ def setup(
         _log(f"[setup] could not probe torch/CUDA: {exc}")
 
 
+def _log_quick_test_footer() -> None:
+    """Short interpretation for Colab logs (paper §§3.2–3.3, IMPROVE.MD prediction parsing)."""
+    _log("")
+    _log("--- How to read this run (see COLAB_SETUP.md) ---")
+    _log("• GPU line (T4/L4/A100): Colab gave you a GPU. There is no 'CPU L4' — L4 is always GPU.")
+    _log("• TEST 2 in ~1s after TEST 1: normal — model already in VRAM; not a failed LLM call.")
+    _log("• TEST 3 scores with variance: PDC path OK (§3.2). All zeros → run debug_scoring_raw().")
+    _log("• TEST 4 synthetic: no gold label; predicted entity only proves pipeline runs.")
+    _log("• MIN_HISTORY_CONTEXTS=0: smoke only. Paper §3.1 filtering uses 300 — set before setup().")
+    _log("• Paper-faithful eval: test_prediction() on real valid + compare pred to e.object.")
+    _log("• BERT UNEXPECTED position_ids: harmless for bert-base-nli-mean-tokens cross-load.")
+
+
 def _timer(name: str):
     """Simple context manager for timing."""
     class Timer:
@@ -527,6 +540,7 @@ def test_quick() -> None:
     _log("\n" + "=" * 50)
     _log("QUICK TESTS COMPLETED")
     _log("=" * 50)
+    _log_quick_test_footer()
     _log("\nTo run full prediction with clustering, use: test_prediction()")
 
 

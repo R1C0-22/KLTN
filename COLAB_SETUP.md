@@ -10,7 +10,8 @@ Colab **L4** is an NVIDIA **GPU**, not a CPU. Free-tier runtimes often assign **
 |--------------|--------|
 | `device: Tesla T4` (or L4 / A100) | GPU name — **not** “CPU L4”; L4 is always a GPU. |
 | `Loading weights: 100%` then long `[test_llm] completed in XXXs` | First `call_llm` pays **one-time** model load; XXXs is normal (often 5–10+ min on first run). |
-| `temperature` / `top_p` ignored | Fixed in `llm/unified.py` by greedy `GenerationConfig` without sampling fields. `git pull` + restart runtime if you still see it. |
+| `temperature` / `top_p` ignored | Fixed in `llm/unified.py` by greedy `GenerationConfig` without sampling fields. `git pull` + restart runtime if you still see it; harmless if generation still works. |
+| `[test_analogical] completed in 0.4s` right after TEST 1 | **Expected**: model already loaded; second forward is fast. Not dummy/cached unless output says `dummy`. |
 | TEST 2 long creative text | Analogical text is **not** a numeric metric; LLMs may hallucinate dates — tune `prompts/reasoning_prompt.txt` for stricter paper-style output. |
 | TEST 3 `scores=[..., ...]` with variance | PDC path OK (JSON logits parsed). All zeros ⇒ check raw output via `debug_scoring_raw()`. |
 | TEST 4 `predicted=India` on synthetic | **No ground-truth label** in toy history — success = pipeline finished; compare to `e.object` only in `test_prediction()` on real `valid`. |
