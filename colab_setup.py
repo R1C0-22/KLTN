@@ -447,85 +447,151 @@ def test_prediction_quick() -> str:
     return pred
 
 
+def test_prediction_metrics(
+    n_queries: int = 20,
+    sample_size: int = 500,
+    use_second_order: bool = False,
+    start_index: int = 0,
+) -> dict[str, float | int | str]:
+    """Evaluate Hit@1 / Hit@10 over multiple validation queries (paper-style aggregate metrics).
+
+    A single query where ``predicted != ground_truth`` is **not** a pipeline bug by itself;
+    TKGF is evaluated with MRR / Hits@k over many queries (see ``IMPROVE.MD``).
+
+    Only queries whose ground truth appears in the candidate set :math:`O_q` are counted
+    toward Hit@k (fair evaluation); others are logged as skipped.
+
+    Parameters
+    ----------
+    n_queries
+        Number of validation samples starting at ``start_index``.
+    sample_size
+        Max entities for clustering (same as ``test_prediction``).
+    use_second_order
+        If True, use second-order candidate set when implemented by ``get_prediction_context``.
+    start_index
+        Offset into the validation split (default 0 = same first query as legacy ``test_prediction``).
+    """
+    from preprocessing import load_dataset
+    from inference.final_prediction import get_prediction_context, predict_next_object_with_probs
+    from clustering.entity_cluster import cluster_entities, extract_entities
+
+    data_dir = os.environ.get("TKG_DATA_DIR", DEFAULT_DATA_DIR)
+    valid_data = load_dataset(data_dir, splits=["valid"])
+    train_data = load_dataset(data_dir, splits=["train"])
+    n_valid = len(valid_data)
+    if n_valid == 0:
+        raise RuntimeError(f"No validation quadruples in {data_dir}")
+
+    end = min(start_index + max(1, n_queries), n_valid)
+    if start_index < 0 or start_index >= n_valid:
+        raise ValueError(f"start_index must be in [0, {n_valid - 1}], got {start_index}")
+
+    anchor = valid_data[start_index]
+    _log(f"[test_prediction_metrics] Loading data from {data_dir}...")
+    _log(f"[test_prediction_metrics] valid queries [{start_index}, {end}) (n_valid={n_valid})")
+
+    _log(f"[test_prediction_metrics] Extracting entities...")
+    entities = extract_entities(train_data)
+    total_entities = len(entities)
+    if sample_size and len(entities) > sample_size:
+        import random
+
+        random.seed(42)
+        sampled = random.sample(entities, sample_size)
+        for probe in (anchor.subject, anchor.object):
+            if probe not in sampled:
+                sampled.append(probe)
+        entities = sorted(sampled)
+        _log(f"[test_prediction_metrics] Sampled {len(entities)} entities (from {total_entities})")
+
+    _log(f"[test_prediction_metrics] Clustering {len(entities)} entities...")
+    with _timer("clustering"):
+        cluster_result = cluster_entities(entities)
+    clear_gpu_memory()
+
+    hits1 = 0
+    hits10 = 0
+    evaluated = 0
+    skipped = 0
+    last_prediction = ""
+
+    for idx in range(start_index, end):
+        e = valid_data[idx]
+        query = (e.subject, e.relation, "?", e.timestamp)
+        gt = e.object.strip()
+        ctx = get_prediction_context(query, cluster_result, use_second_order)
+        cand_norm = {c.strip() for c in ctx.candidate_set}
+        in_oq = gt in cand_norm
+        if not in_oq:
+            skipped += 1
+            _log(
+                f"[test_prediction_metrics] i={idx} SKIP gt not in Oq | gt={gt!r} |Oq|={len(ctx.candidate_set)}"
+            )
+            continue
+
+        _log(
+            f"[test_prediction_metrics] i={idx} query={query} gt={gt!r} "
+            f"|Oq|={len(ctx.candidate_set)} "
+            f"used_second_order={getattr(ctx, 'used_second_order_neighbors', False)}"
+        )
+        with _timer(f"prediction[{idx}]"):
+            res = predict_next_object_with_probs(query, cluster_result, use_second_order)
+        pred = res.predicted.strip()
+        last_prediction = pred
+        evaluated += 1
+        ok1 = pred == gt
+        ok10 = res.hit_at_k(gt, 10)
+        if ok1:
+            hits1 += 1
+        if ok10:
+            hits10 += 1
+        _log(
+            f"[test_prediction_metrics] i={idx} predicted={pred!r} "
+            f"Hit@1={ok1} Hit@10={ok10}"
+        )
+
+    hit1_rate = (hits1 / evaluated) if evaluated else 0.0
+    hit10_rate = (hits10 / evaluated) if evaluated else 0.0
+    _log(
+        f"[test_prediction_metrics] SUMMARY evaluated={evaluated} "
+        f"skipped_gt_not_in_Oq={skipped} "
+        f"Hit@1={hit1_rate:.4f} Hit@10={hit10_rate:.4f}"
+    )
+    if end - start_index == 1 and evaluated == 1 and hits1 == 0:
+        _log(
+            "[test_prediction_metrics] NOTE: Hit@1 miss on one query is normal for TKGF; "
+            "use test_prediction_metrics(n_queries=20, ...) for a stable aggregate. "
+            "If Hit@1 stays low: run test_scoring(), set HF_LOGPROB_FAST=0, or try use_second_order=True."
+        )
+
+    clear_gpu_memory()
+    return {
+        "last_prediction": last_prediction,
+        "hit_at_1": hit1_rate,
+        "hit_at_10": hit10_rate,
+        "evaluated": evaluated,
+        "skipped_gt_not_in_oq": skipped,
+        "n_queries_run": end - start_index,
+    }
+
+
 def test_prediction(sample_size: int = 500, use_second_order: bool = False) -> str:
     """Test 4b: Full prediction with real data (includes clustering).
 
     WARNING: Runtime is dominated by many LLM calls (PDC per timestep + analogical + predict).
     On A100 prefer ``setup(..., load_4bit=False)`` and ``verbose=False`` for speed.
-    
-    Args:
-        sample_size: Max entities for clustering (reduces time and memory)
-        use_second_order: If True, use O²q candidate set (paper Table 2). Helps when GT ∉ Oq.
-    """
-    from preprocessing import load_dataset
-    from inference.final_prediction import predict_next_object, get_prediction_context
-    from clustering.entity_cluster import cluster_entities, extract_entities
-    
-    data_dir = os.environ.get("TKG_DATA_DIR", DEFAULT_DATA_DIR)
-    
-    _log(f"[test_prediction] Loading data from {data_dir}...")
-    valid_data = load_dataset(data_dir, splits=["valid"])
-    train_data = load_dataset(data_dir, splits=["train"])
-    
-    e = valid_data[0]
-    query = (e.subject, e.relation, "?", e.timestamp)
-    
-    _log(f"[test_prediction] query={query}")
-    _log(f"[test_prediction] ground_truth={e.object}")
-    
-    _log(f"[test_prediction] Extracting entities...")
-    entities = extract_entities(train_data)
-    total_entities = len(entities)
-    
-    if sample_size and len(entities) > sample_size:
-        import random
-        random.seed(42)
-        sampled = random.sample(entities, sample_size)
-        if e.subject not in sampled:
-            sampled.append(e.subject)
-        if e.object not in sampled:
-            sampled.append(e.object)
-        entities = sorted(sampled)
-        _log(f"[test_prediction] Sampled {len(entities)} entities (from {total_entities})")
-    
-    _log(f"[test_prediction] Clustering {len(entities)} entities...")
-    with _timer("clustering"):
-        cluster_result = cluster_entities(entities)
-    
-    clear_gpu_memory()
 
-    ctx = get_prediction_context(query, cluster_result, use_second_order)
-    gt_norm = e.object.strip()
-    in_oq = gt_norm in {c.strip() for c in ctx.candidate_set}
-    _log(
-        f"[test_prediction] |Oq|={len(ctx.candidate_set)} "
-        f"used_second_order_neighbors={getattr(ctx, 'used_second_order_neighbors', False)} "
-        f"ground_truth_in_candidate_set={in_oq}"
+    This is a thin wrapper around :func:`test_prediction_metrics` with ``n_queries=1``.
+    For paper-faithful numbers, call ``test_prediction_metrics(n_queries=20, ...)`` instead.
+    """
+    stats = test_prediction_metrics(
+        n_queries=1,
+        sample_size=sample_size,
+        use_second_order=use_second_order,
+        start_index=0,
     )
-    if not in_oq:
-        _log(
-            "[test_prediction] NOTE: ground truth not in Oq — Hit@1 impossible; "
-            "try test_prediction(..., use_second_order=True) or lower MIN_HISTORY_CONTEXTS."
-        )
-    
-    _log(f"[test_prediction] Running prediction...")
-    with _timer("prediction"):
-        pred = predict_next_object(query, cluster_result, use_second_order)
-    
-    _log(f"[test_prediction] predicted={pred}")
-    _log(f"[test_prediction] ground_truth={e.object}")
-    _log(f"[test_prediction] correct={pred == e.object}")
-    if pred != e.object:
-        _log(
-            "[test_prediction] NOTE: Hit@1 miss on one query is normal for TKGF; "
-            "paper reports MRR / Hits@k over many queries. "
-            "If many misses: check PDC scores (test_scoring), HF logprob path "
-            "(HF_LOGPROB_FAST=0 default in llm/unified.py), or run more valid samples."
-        )
-    
-    clear_gpu_memory()
-    
-    return pred
+    return str(stats["last_prediction"])
 
 
 def test_quick() -> None:
