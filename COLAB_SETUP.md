@@ -44,6 +44,8 @@ test_quick()
 
 **Do not** run `pip install -U torch` by itself. Colab ships PyTorch + CUDA builds; upgrading only `torch` often breaks `torchvision` / `torchaudio` and can leave `torch` in a half-upgraded state (`AttributeError: module 'torch' has no attribute 'device'`). Prefer keeping Colab’s torch unless you install a **matching** trio from [pytorch.org](https://pytorch.org/get-started/locally/).
 
+If `setup()` used to crash inside `clear_gpu_memory` → `torch.cuda.synchronize()`, `colab_setup.py` now catches that and continues (empty cache still runs). **Runtime → Restart session** is still the right fix if `import torch` itself is broken.
+
 ```python
 # Mount Drive (optional - cache HF models)
 from google.colab import drive, userdata

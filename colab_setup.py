@@ -149,14 +149,28 @@ def _log(msg: str) -> None:
 
 
 def clear_gpu_memory() -> None:
-    """Clear GPU memory cache to prevent OOM errors."""
+    """Clear GPU memory cache to prevent OOM errors.
+
+    Never raises: on some Colab / PyTorch builds ``torch.cuda.synchronize()`` can
+    throw ``AttributeError: module 'torch' has no attribute 'device'`` inside CUDA
+    internals even when ``import torch`` looks fine. ``empty_cache()`` is enough
+    for our use; synchronize is best-effort only.
+    """
     gc.collect()
     try:
         import torch
+    except ImportError:
+        return
+    if not hasattr(torch, "device"):
+        return
+    try:
         if torch.cuda.is_available():
             torch.cuda.empty_cache()
-            torch.cuda.synchronize()
-    except ImportError:
+            try:
+                torch.cuda.synchronize()
+            except Exception:
+                pass
+    except Exception:
         pass
 
 
