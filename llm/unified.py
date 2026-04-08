@@ -45,6 +45,7 @@ For Hugging Face local (Colab GPU — download weights, matches paper model fami
 
 from __future__ import annotations
 
+import copy
 import json
 import os
 import urllib.error
@@ -332,19 +333,23 @@ def _call_huggingface(prompt: str) -> str:
     if verbose:
         _log(f"[llm] Generating (input={input_ids.shape[1]} tokens, max_new={max_new})...")
 
-    # Explicit GenerationConfig avoids warnings from stale model.generation_config
-    # (temperature/top_p) when do_sample=False.
+    # Greedy decode: merge from model.generation_config but clear sampling fields.
+    # Otherwise HF may warn that temperature/top_p are ignored when do_sample=False.
     from transformers import GenerationConfig
 
-    # Put *all* generation flags on GenerationConfig only — passing
-    # ``use_cache=...`` alongside ``generation_config=`` triggers HF warnings.
-    gen_cfg = GenerationConfig(
-        max_new_tokens=max_new,
-        do_sample=False,
-        use_cache=True,
-        pad_token_id=tokenizer.pad_token_id,
-        eos_token_id=getattr(tokenizer, "eos_token_id", None),
-    )
+    base = getattr(model, "generation_config", None)
+    if isinstance(base, GenerationConfig):
+        gen_cfg = copy.deepcopy(base)
+    else:
+        gen_cfg = GenerationConfig()
+    gen_cfg.max_new_tokens = max_new
+    gen_cfg.do_sample = False
+    gen_cfg.use_cache = True
+    gen_cfg.pad_token_id = tokenizer.pad_token_id
+    gen_cfg.eos_token_id = getattr(tokenizer, "eos_token_id", None)
+    for attr in ("temperature", "top_p", "top_k"):
+        if hasattr(gen_cfg, attr):
+            setattr(gen_cfg, attr, None)
 
     out = None
     new_tokens = None

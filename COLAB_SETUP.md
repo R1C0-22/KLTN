@@ -10,7 +10,7 @@ Colab **L4** is an NVIDIA **GPU**, not a CPU. Free-tier runtimes often assign **
 |--------------|--------|
 | `device: Tesla T4` (or L4 / A100) | GPU name — **not** “CPU L4”; L4 is always a GPU. |
 | `Loading weights: 100%` then long `[test_llm] completed in XXXs` | First `call_llm` pays **one-time** model load; XXXs is normal (often 5–10+ min on first run). |
-| `temperature` / `top_p` ignored | Should disappear after `git pull` of `llm/unified.py` (GenerationConfig-only path). |
+| `temperature` / `top_p` ignored | Fixed in `llm/unified.py` by greedy `GenerationConfig` without sampling fields. `git pull` + restart runtime if you still see it. |
 | TEST 2 long creative text | Analogical text is **not** a numeric metric; LLMs may hallucinate dates — tune `prompts/reasoning_prompt.txt` for stricter paper-style output. |
 | TEST 3 `scores=[..., ...]` with variance | PDC path OK (JSON logits parsed). All zeros ⇒ check raw output via `debug_scoring_raw()`. |
 | TEST 4 `predicted=India` on synthetic | **No ground-truth label** in toy history — success = pipeline finished; compare to `e.object` only in `test_prediction()` on real `valid`. |
@@ -29,15 +29,34 @@ Colab **L4** is an NVIDIA **GPU**, not a CPU. Free-tier runtimes often assign **
 **Smoke test with tiny history:** set `MIN_HISTORY_CONTEXTS=0` before `setup()` so similar-event filtering (§3.1, paper ≥300) does not empty candidates on toy data:
 
 ```python
+# Full cell (matches typical notebook flow): verify GPU + smoke tests
 import os, sys
+
+import torch
+print("torch:", getattr(torch, "__version__", "?"), getattr(torch, "__file__", ""))
+print("cuda:", torch.cuda.is_available())
+if torch.cuda.is_available():
+    # Colab assigns T4 / L4 / A100 — all are GPUs. "L4" is never a CPU.
+    print("device:", torch.cuda.get_device_name(0))
+
 os.chdir("/content/KLTN")
 sys.path.insert(0, "/content/KLTN")
-os.environ["MIN_HISTORY_CONTEXTS"] = "0"  # smoke only; use 300 for real ICEWS runs
+
+os.environ["MIN_HISTORY_CONTEXTS"] = "0"  # smoke only; paper §3.1: use "300" for real ICEWS runs
 
 from colab_setup import setup, test_quick
-setup("llama", load_4bit=True, max_tokens=128, short_term_l=5, history_length=30)
+
+setup(
+    "llama",
+    load_4bit=True,
+    max_tokens=128,
+    short_term_l=5,
+    history_length=30,
+)
 test_quick()
 ```
+
+**Is the run “correct”?** For smoke: yes if TEST 1 prints text, TEST 3 scores are not all zeros, TEST 4 finishes. `MIN_HISTORY_CONTEXTS=0` is **not** paper-faithful for §3.1 filtering; use `300` when comparing to AnRe. TEST 4 synthetic `predicted=India` has **no gold label** — only proves the pipeline runs; use `test_prediction()` on real `valid` for Hit@1-style checks.
 
 ### Cell 1: Clone and Install
 `load_4bit=True` (default in `setup()`) **requires `bitsandbytes`**. If you skip install or run `setup()` before install, you get `ImportError: ... bitsandbytes ...`. Install first, then restart.
