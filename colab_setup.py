@@ -92,19 +92,28 @@ def ensure_colab_repo(
 
 
 def pip_install_colab_deps(extra: list[str] | None = None) -> None:
-    """Install runtime deps used by this project (Colab / GPU)."""
+    """Install runtime deps used by this project (Colab / GPU).
+
+    Colab pitfall: ``pip install -U numpy`` can pull numpy 2.4+, which breaks
+    the scipy/sklearn stack preinstalled on the image; then ``import transformers``
+    fails with confusing errors (e.g. missing ``GenerationMixin`` / ``AutoModelForCausalLM``).
+    Pin numpy first, then install the rest.
+    """
+    subprocess.run(
+        [sys.executable, "-m", "pip", "install", "-q", "-U", "pip", "numpy>=1.26,<2.1"],
+        check=True,
+    )
     base = [
         "transformers",
         "accelerate",
-        "bitsandbytes",
+        "bitsandbytes>=0.46.1",
         "sentence-transformers",
         "scikit-learn",
-        "numpy",
     ]
     if extra:
         base.extend(extra)
     subprocess.run(
-        [sys.executable, "-m", "pip", "install", "-q", "-U", "pip", *base],
+        [sys.executable, "-m", "pip", "install", "-q", "-U", *base],
         check=True,
     )
 
@@ -230,6 +239,16 @@ def setup(
         f"(paper §6.1); adaptive_O2={adaptive_candidates}"
     )
     _log(f"[setup] data={data_dir}")
+
+    try:
+        import torch
+
+        if torch.cuda.is_available():
+            _log(f"[setup] cuda_available=True device={torch.cuda.get_device_name(0)}")
+        else:
+            _log("[setup] cuda_available=False (CPU-only — LLM + embeds will be very slow)")
+    except Exception as exc:
+        _log(f"[setup] could not probe torch/CUDA: {exc}")
 
 
 def _timer(name: str):

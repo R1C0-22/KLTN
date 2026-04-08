@@ -110,6 +110,8 @@ def generate_analysis_process(
     history: Sequence[Any],
     similar_event: Any,
     ground_truth_answer: str,
+    *,
+    target_query: str | None = None,
 ) -> str:
     """Generate analysis process pai for a similar event using LLM.
     
@@ -134,17 +136,22 @@ def generate_analysis_process(
     """
     prompt_template = _load_prompt_template()
     generator = _load_llm_generator_from_env()
-    
+
+    tq = (target_query or "").strip()
+    if not tq:
+        tq = "— (not specified — internal call without a separate target query) —"
+
     history_lines = [_event_to_text(ev) for ev in history]
     history_text = "\n".join(history_lines) if history_lines else "- none -"
-    
+
     s, r, o, t = event_fields(similar_event)
     from preprocessing import verbalize_event
     question_text = verbalize_event(s, r, "?", t)
     if question_text.endswith("."):
         question_text = question_text[:-1] + "?"
-    
+
     prompt = prompt_template.format(
+        target_query=tq,
         history=history_text,
         question=question_text,
         answer=ground_truth_answer,
@@ -170,19 +177,26 @@ def generate_analogical_reasoning(event: Any, similar_events: Sequence[Any]) -> 
 
     Uses the **last** event in *similar_events* as the grounded similar quadruple
     (answer = its object) and all **preceding** events as *history*. The *event*
-    argument is accepted for API compatibility (e.g. masked target query) but is
-    not required for the LLM call when *similar_events* is non-empty.
+    argument (masked target query) is verbalized into the prompt as *target_query*
+    so the LLM sees both the main prediction task and the analogical chain (§3.3).
     """
-    _ = event  # masked query kept for notebook API compatibility
     if not similar_events:
         raise ValueError("similar_events must contain at least one event.")
     history = list(similar_events[:-1])
     similar_event = similar_events[-1]
     _s, _r, ans, _t = event_fields(similar_event)
+
+    from preprocessing import verbalize_event
+
+    ts, tr, to, tt = event_fields(event)
+    mask = "?" if to is None or str(to).strip() in {"?", "None", "null"} else str(to)
+    target_query = verbalize_event(ts, tr, mask, tt)
+
     return generate_analysis_process(
         history=history,
         similar_event=similar_event,
         ground_truth_answer=str(ans).strip(),
+        target_query=target_query,
     )
 
 

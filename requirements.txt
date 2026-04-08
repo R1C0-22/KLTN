@@ -3,3 +3,4 @@ accelerate
 bitsandbytes
 sentence-transformers
 scikit-learn
+numpy>=1.26,<2.1

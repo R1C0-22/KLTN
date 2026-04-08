@@ -1,12 +1,15 @@
-Here are some time-ordered historical event chains and a question-answer pair. Please analyze how the answer to the question is derived based on the historical development process in the event chain.
+Main target query (the masked prediction you will make later in the pipeline; keep dates exactly as given):
+{target_query}
+
+Below is an analogical replay block: a time-ordered chain of historical events, then a masked question about a similar past event, and its known answer (from history). Explain how the known answer is supported by the chain (paper §3.3 analogical reasoning).
 
 Historical Events:
 {history}
 
-Question:
+Question (similar past event, masked object):
 {question}
 
-Answer:
+Answer (known object for that similar past event):
 {answer}
 
 Your Analysis:

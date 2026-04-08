@@ -9,7 +9,7 @@ Colab **L4** is an NVIDIA **GPU**, not a CPU. If the runtime shows CPU-only, emb
 | Block | Meaning |
 |-------|--------|
 | TEST 1 | `call_llm` works (Llama/Qwen loaded). |
-| TEST 2 | Analogical text (§3.3). If the model talks about the wrong country, the **similar_events** in the test were mismatched; use coherent China-centric examples (see `colab_setup.test_analogical`). |
+| TEST 2 | Analogical text (§3.3). The prompt now includes the **masked target query** plus the similar-event chain (last event = known answer). If the narrative still drifts, check `prompts/reasoning_prompt.txt` and `generate_analogical_reasoning`. |
 | TEST 3 | PDC scores as JSON array (§3.2). Non-zero variance ⇒ scorer OK. |
 | TEST 4 | End-to-end on **synthetic** history; loads the §3.1 embedder once (shared cache). `predicted=…` is not necessarily “ground truth” — synthetic data has no label. |
 | BERT `UNEXPECTED position_ids` | Harmless when loading `bert-base-nli-mean-tokens` cross-task. |
@@ -44,8 +44,11 @@ os.environ["HF_TOKEN"] = userdata.get("HF_TOKEN")  # for gated Llama
 !cp -r /content/drive/MyDrive/data /content/KLTN/  # if data on Drive
 
 # Install dependencies — bitsandbytes MUST be present before setup(load_4bit=True)
+# IMPORTANT: pin numpy <2.1 first. Unpinned ``-U numpy`` can install 2.4+ and break
+# scipy/sklearn on Colab, then transformers fails to import (GenerationMixin / AutoModelForCausalLM).
 !python -m pip install -q -U pip
-!python -m pip install -q -U "bitsandbytes>=0.46.1" transformers accelerate sentence-transformers scikit-learn numpy
+!python -m pip install -q -U "numpy>=1.26,<2.1"
+!python -m pip install -q -U "bitsandbytes>=0.46.1" transformers accelerate sentence-transformers scikit-learn
 ```
 
 **After this cell: Runtime → Restart session**, then run Cell 2.
@@ -109,6 +112,7 @@ debug_scoring_raw(n=3)  # See raw LLM output for scoring
 | `CUDA out of memory` | Use `setup("llama", load_4bit=True)` (default now) |
 | Prediction ≠ ground truth but `ground_truth_in_candidate_set=False` | Expected: expand candidates with `test_prediction(use_second_order=True)` or lower `MIN_HISTORY_CONTEXTS` |
 | `temperature` / `top_p` ignored warnings | Fixed in `llm/unified.py` via explicit `GenerationConfig`; `git pull` |
+| `numpy._core... _blas_supports_fpe` / `ModuleNotFoundError: GenerationMixin` / `AutoModelForCausalLM` | Caused by numpy 2.4+ breaking scipy/sklearn. Fix: `pip install "numpy>=1.26,<2.1"` then **Restart runtime**, re-run pip + `test_quick()` |
 | Very slow PDC scoring | Defaults: `HF_SCORE_MAX_NEW_TOKENS=256`, `LLM_SCORE_CHUNK_SIZE=24` (set in `setup()`) |
 
 ---
