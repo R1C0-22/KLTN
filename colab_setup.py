@@ -306,8 +306,12 @@ def _timer(name: str):
 def test_llm() -> str:
     """Test 1: Basic LLM call."""
     from llm.unified import call_llm
-    
-    _log("[test_llm] calling model...")
+
+    _log(
+        "[test_llm] calling model... "
+        "(first call in a fresh runtime includes HF download + load + first forward; "
+        "often minutes on T4; later calls are much faster)"
+    )
     with _timer("test_llm"):
         result = call_llm("Say hello in one sentence.")
     _log(f"[test_llm] output: {result}")

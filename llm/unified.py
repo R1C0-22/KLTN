@@ -336,9 +336,12 @@ def _call_huggingface(prompt: str) -> str:
     # (temperature/top_p) when do_sample=False.
     from transformers import GenerationConfig
 
+    # Put *all* generation flags on GenerationConfig only — passing
+    # ``use_cache=...`` alongside ``generation_config=`` triggers HF warnings.
     gen_cfg = GenerationConfig(
         max_new_tokens=max_new,
         do_sample=False,
+        use_cache=True,
         pad_token_id=tokenizer.pad_token_id,
         eos_token_id=getattr(tokenizer, "eos_token_id", None),
     )
@@ -351,7 +354,6 @@ def _call_huggingface(prompt: str) -> str:
                 input_ids,
                 attention_mask=attention_mask,
                 generation_config=gen_cfg,
-                use_cache=True,
             )
 
         new_tokens = out[0, input_ids.shape[1] :]

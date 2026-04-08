@@ -1,8 +1,20 @@
 # Colab Setup for AnRe TKG Forecasting
 
-## Quick Start (GPU: L4 / A100)
+## Quick Start (GPU: T4 / L4 / A100)
 
-Colab **L4** is an NVIDIA **GPU**, not a CPU. If the runtime shows CPU-only, embedding + LLM will be very slow. Check: `import torch; print(torch.cuda.is_available())`.
+Colab **L4** is an NVIDIA **GPU**, not a CPU. Free-tier runtimes often assign **Tesla T4** (~16GB VRAM); Pro / higher tiers may give **L4** or **A100**. If the runtime shows CPU-only, embedding + LLM will be very slow. Check: `import torch; print(torch.cuda.is_available()); print(torch.cuda.get_device_name(0))`.
+
+### Reading a saved log (e.g. `output.txt`)
+
+| Line / block | Meaning |
+|--------------|--------|
+| `device: Tesla T4` (or L4 / A100) | GPU name — **not** “CPU L4”; L4 is always a GPU. |
+| `Loading weights: 100%` then long `[test_llm] completed in XXXs` | First `call_llm` pays **one-time** model load; XXXs is normal (often 5–10+ min on first run). |
+| `temperature` / `top_p` ignored | Should disappear after `git pull` of `llm/unified.py` (GenerationConfig-only path). |
+| TEST 2 long creative text | Analogical text is **not** a numeric metric; LLMs may hallucinate dates — tune `prompts/reasoning_prompt.txt` for stricter paper-style output. |
+| TEST 3 `scores=[..., ...]` with variance | PDC path OK (JSON logits parsed). All zeros ⇒ check raw output via `debug_scoring_raw()`. |
+| TEST 4 `predicted=India` on synthetic | **No ground-truth label** in toy history — success = pipeline finished; compare to `e.object` only in `test_prediction()` on real `valid`. |
+| BERT `UNEXPECTED position_ids` | Harmless for `bert-base-nli-mean-tokens` cross-load (see note below). |
 
 ### How to read `test_quick()` output
 
