@@ -265,9 +265,9 @@ def setup(
     os.environ.setdefault("HF_PREDICT_MAX_NEW_TOKENS", str(max(128, min(512, max_tokens * 2))))
     os.environ["TKG_DATA_DIR"] = os.path.join(REPO_ROOT, data_dir)
     os.environ["LLM_SCORE_PARSE_FALLBACK"] = "1"
-    os.environ.setdefault("HF_SCORE_MAX_NEW_TOKENS", "256")
+    os.environ.setdefault("HF_SCORE_MAX_NEW_TOKENS", "160")
     # Larger chunks => fewer HF forward passes per timestep (faster; slightly longer prompts).
-    os.environ.setdefault("LLM_SCORE_CHUNK_SIZE", "48")
+    os.environ.setdefault("LLM_SCORE_CHUNK_SIZE", "24")
     # Cap events per calendar day before PDC — ICEWS days can have 1000+ events.
     os.environ.setdefault("LLM_SCORE_MAX_EVENTS_PER_TIMESTEP", "64")
     # empty_cache() after every generate() is very slow on Colab; enable only if OOM.

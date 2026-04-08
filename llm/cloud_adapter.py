@@ -54,8 +54,9 @@ from .unified import call_llm, call_llm_logprobs
 def _min_score_max_new_tokens(n_events: int) -> int:
     """Lower bound on new tokens so a JSON array of n floats can finish (closing `]`)."""
     n = max(1, int(n_events))
-    # Tight JSON array budget (~10 chars/float + commas); avoids 512-token generations per chunk.
-    return max(64, min(2048, 10 * n + 48))
+    # Keep this conservative but short: we only need a numeric JSON array.
+    # Large values (e.g. 500+) make local HF runs look "hung" on Colab.
+    return max(48, min(384, 4 * n + 24))
 
 
 def _effective_score_max_new_tokens(n_events: int) -> int:
@@ -63,7 +64,9 @@ def _effective_score_max_new_tokens(n_events: int) -> int:
     raw = os.environ.get("HF_SCORE_MAX_NEW_TOKENS", "").strip()
     user = int(raw) if raw.isdigit() else 0
     need = _min_score_max_new_tokens(n_events)
-    return max(need, user) if user else need
+    # If user sets HF_SCORE_MAX_NEW_TOKENS, treat it as an explicit override.
+    # This keeps notebook behavior predictable when tuning runtime vs quality.
+    return max(32, user) if user else need
 
 
 def generate_fn(prompt: str) -> str:
