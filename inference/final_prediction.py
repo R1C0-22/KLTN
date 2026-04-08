@@ -207,16 +207,13 @@ def _extract_predicted_object(llm_output: str, candidates: Sequence[str]) -> str
     except Exception:
         pass
 
-    # 7) Longest substring match (last resort — often wrong when |Oq| is huge and the model
-    # mentions many entity names in a long rationale). Off by default; set
-    # PREDICT_USE_SUBSTRING_FALLBACK=1 only for debugging / small candidate sets.
-    if _env_truthy("PREDICT_USE_SUBSTRING_FALLBACK", False):
-        best = ""
-        for c in sorted(cand_list, key=len, reverse=True):
-            if c in out and len(c) > len(best):
-                best = c
-        if best:
-            return best
+    # 7) Longest substring match (last resort — can be wrong if rationale cites many entities)
+    best = ""
+    for c in sorted(cand_list, key=len, reverse=True):
+        if c in out and len(c) > len(best):
+            best = c
+    if best:
+        return best
 
     # 8) Single-token junk (e.g. ")" from truncation) — do not return as entity
     fl = (first_line or out).strip()
@@ -398,10 +395,8 @@ def predict_next_object(
     )
     
     use_logprobs = _env_truthy("USE_LOGPROB_PREDICTION", default=True)
-    # Default high enough for full ICEWS Oq (~5k+); if too low, code falls back to
-    # generate + parsing and substring heuristics → frequent wrong picks vs ground truth.
-    max_lp_raw = os.environ.get("MAX_LOGPROB_CANDIDATES", "8192").strip()
-    max_logprob_candidates = int(max_lp_raw) if max_lp_raw.isdigit() else 8192
+    max_lp_raw = os.environ.get("MAX_LOGPROB_CANDIDATES", "512").strip()
+    max_logprob_candidates = int(max_lp_raw) if max_lp_raw.isdigit() else 512
 
     if (
         use_logprobs
@@ -473,8 +468,8 @@ def predict_next_object_with_probs(
         query_event, cluster_result, use_second_order_candidates
     )
     
-    max_lp_raw = os.environ.get("MAX_LOGPROB_CANDIDATES", "8192").strip()
-    max_logprob_candidates = int(max_lp_raw) if max_lp_raw.isdigit() else 8192
+    max_lp_raw = os.environ.get("MAX_LOGPROB_CANDIDATES", "512").strip()
+    max_logprob_candidates = int(max_lp_raw) if max_lp_raw.isdigit() else 512
 
     if ctx.candidate_set and len(ctx.candidate_set) <= max_logprob_candidates:
         try:

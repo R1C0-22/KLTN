@@ -126,17 +126,6 @@ def clear_gpu_memory() -> None:
         pass
 
 
-def clear_runtime_memory() -> None:
-    """Free Python heap and CUDA cache between Colab tests (same idea as end of ``test_prediction``).
-
-    One ``gc.collect()`` pass is often not enough after LLM / embedding forward passes;
-    pairing GC with ``empty_cache`` reduces RAM spikes when running ``test_quick`` back-to-back.
-    """
-    gc.collect()
-    clear_gpu_memory()
-    gc.collect()
-
-
 def setup(
     model: str = "qwen",
     load_4bit: bool = True,
@@ -176,8 +165,6 @@ def setup(
     # print a short rationale + the index (paper §3.3). Overrides HF_MAX_NEW_TOKENS
     # only inside ``predict_fn`` (see llm/cloud_adapter.py).
     os.environ.setdefault("HF_PREDICT_MAX_NEW_TOKENS", str(max(128, min(512, max_tokens * 2))))
-    # Large |Oq| on ICEWS: must use paper §3.3 logprob path, not generate+substring.
-    os.environ.setdefault("MAX_LOGPROB_CANDIDATES", "8192")
     os.environ["TKG_DATA_DIR"] = os.path.join(REPO_ROOT, data_dir)
     os.environ["LLM_SCORE_PARSE_FALLBACK"] = "1"
     os.environ.setdefault("HF_SCORE_MAX_NEW_TOKENS", "256")
@@ -249,11 +236,12 @@ def test_analogical(max_chars: int = 0) -> str:
     """
     from analogical import generate_analogical_reasoning
     
+    # Same subject/relation family as the query so the LLM does not drift to unrelated entities.
     event = ("China", "meet", "?", "2014-01-01")
     similar = [
-        ("Russia", "consult", "Belarus", "2012-06-01"),
-        ("Russia", "meet", "Ukraine", "2012-12-01"),
-        ("Russia", "meet", "Belarus", "2013-01-01"),
+        ("China", "meet", "Japan", "2013-01-01"),
+        ("China", "consult", "Russia", "2013-06-01"),
+        ("China", "meet", "India", "2013-12-01"),
     ]
     
     _log(f"[test_analogical] event={event}")
@@ -377,7 +365,7 @@ def test_prediction(sample_size: int = 500, use_second_order: bool = False) -> s
     with _timer("clustering"):
         cluster_result = cluster_entities(entities)
     
-    clear_runtime_memory()
+    clear_gpu_memory()
 
     ctx = get_prediction_context(query, cluster_result, use_second_order)
     gt_norm = e.object.strip()
@@ -400,65 +388,57 @@ def test_prediction(sample_size: int = 500, use_second_order: bool = False) -> s
     _log(f"[test_prediction] predicted={pred}")
     _log(f"[test_prediction] ground_truth={e.object}")
     _log(f"[test_prediction] correct={pred == e.object}")
-
-    clear_runtime_memory()
-
+    
+    clear_gpu_memory()
+    
     return pred
 
 
 def test_quick() -> None:
-    """Run quick tests (1-3 + 4a). Total time: ~30-60s.
-
-    Calls :func:`clear_runtime_memory` after each sub-test (same pattern as
-    ``test_prediction``: avoid retaining activations / large tensors between steps).
-    """
-    clear_runtime_memory()
-
+    """Run quick tests (1-3 + 4a). Total time: ~30-60s."""
     _log("\n" + "=" * 50)
     _log("TEST 1: Basic LLM call")
     _log("=" * 50)
     test_llm()
-    clear_runtime_memory()
-
+    clear_gpu_memory()
+    
     _log("\n" + "=" * 50)
     _log("TEST 2: Analogical reasoning (paper §3.3)")
     _log("=" * 50)
     test_analogical(max_chars=3000)
-    clear_runtime_memory()
-
+    clear_gpu_memory()
+    
     _log("\n" + "=" * 50)
     _log("TEST 3: LLM scoring (paper §3.2 PDC)")
     _log("=" * 50)
     test_scoring(n=5)
-    clear_runtime_memory()
-
+    clear_gpu_memory()
+    
     _log("\n" + "=" * 50)
     _log("TEST 4: Quick prediction (synthetic data)")
     _log("=" * 50)
     test_prediction_quick()
-    clear_runtime_memory()
-
+    clear_gpu_memory()
+    
     _log("\n" + "=" * 50)
     _log("QUICK TESTS COMPLETED")
     _log("=" * 50)
     _log("\nTo run full prediction with clustering, use: test_prediction()")
 
-    clear_runtime_memory()
-
 
 def test_all() -> None:
     """Run all tests including full prediction. Total time: ~3-5 min."""
     test_quick()
-
-    clear_runtime_memory()
+    
+    clear_gpu_memory()
     
     _log("\n" + "=" * 50)
     _log("TEST 5: Full prediction (real data + clustering)")
     _log("=" * 50)
     test_prediction()
-
-    clear_runtime_memory()
-
+    
+    clear_gpu_memory()
+    
     _log("\n" + "=" * 50)
     _log("ALL TESTS COMPLETED")
     _log("=" * 50)

@@ -1,6 +1,31 @@
 # Colab Setup for AnRe TKG Forecasting
 
-## Quick Start (A100 GPU)
+## Quick Start (GPU: L4 / A100)
+
+Colab **L4** is an NVIDIA **GPU**, not a CPU. If the runtime shows CPU-only, embedding + LLM will be very slow. Check: `import torch; print(torch.cuda.is_available())`.
+
+### How to read `test_quick()` output
+
+| Block | Meaning |
+|-------|--------|
+| TEST 1 | `call_llm` works (Llama/Qwen loaded). |
+| TEST 2 | Analogical text (§3.3). If the model talks about the wrong country, the **similar_events** in the test were mismatched; use coherent China-centric examples (see `colab_setup.test_analogical`). |
+| TEST 3 | PDC scores as JSON array (§3.2). Non-zero variance ⇒ scorer OK. |
+| TEST 4 | End-to-end on **synthetic** history; loads the §3.1 embedder once (shared cache). `predicted=…` is not necessarily “ground truth” — synthetic data has no label. |
+| BERT `UNEXPECTED position_ids` | Harmless when loading `bert-base-nli-mean-tokens` cross-task. |
+
+**Smoke test with tiny history:** set `MIN_HISTORY_CONTEXTS=0` before `setup()` so similar-event filtering (§3.1, paper ≥300) does not empty candidates on toy data:
+
+```python
+import os, sys
+os.chdir("/content/KLTN")
+sys.path.insert(0, "/content/KLTN")
+os.environ["MIN_HISTORY_CONTEXTS"] = "0"  # smoke only; use 300 for real ICEWS runs
+
+from colab_setup import setup, test_quick
+setup("llama", load_4bit=True, max_tokens=128, short_term_l=5, history_length=30)
+test_quick()
+```
 
 ### Cell 1: Clone and Install
 ```python

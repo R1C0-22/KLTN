@@ -18,8 +18,8 @@ from datetime import datetime
 from typing import Any, Sequence
 
 import numpy as np
-from sentence_transformers import SentenceTransformer
 
+from clustering.shared_st import get_shared_sentence_transformer
 from common import DEFAULT_EMBED_MODEL, event_fields, parse_timestamp
 
 logger = logging.getLogger(__name__)
@@ -120,7 +120,7 @@ def filter_events_by_history_requirement(
 def rank_events_by_similarity(
     events: Sequence[Any],
     query_event: Any,
-    model: SentenceTransformer | None = None,
+    model: Any | None = None,
 ) -> list[tuple[Any, float]]:
     """Rank events by semantic similarity to the query.
     
@@ -136,8 +136,8 @@ def rank_events_by_similarity(
         return []
     
     if model is None:
-        model = SentenceTransformer(DEFAULT_EMBED_MODEL)
-    
+        model = get_shared_sentence_transformer(DEFAULT_EMBED_MODEL, device=None)
+
     from preprocessing import verbalize_event
 
     def event_to_text(ev: Any) -> str:
@@ -174,7 +174,7 @@ def find_similar_events_from_cluster(
     short_term_l: int = 20,
     dual_history_target_L: int = 100,
     dtf_alpha: float = 2.75,
-    model: SentenceTransformer | None = None,
+    model: Any | None = None,
 ) -> list[SimilarEventCandidate]:
     """Find similar events from entities in the same cluster.
     
@@ -206,7 +206,7 @@ def find_similar_events_from_cluster(
         Target total history length L for dual extraction (default 100).
     dtf_alpha : float
         Dynamic threshold factor α (default 2.75). Paper §6.1.
-    model : SentenceTransformer | None
+    model : optional
         Embedding model for similarity computation (default: BERT NLI, AnRe §3.1).
     
     Returns
@@ -222,7 +222,7 @@ def find_similar_events_from_cluster(
     rq = rq.strip().lower()
 
     if model is None:
-        model = SentenceTransformer(DEFAULT_EMBED_MODEL)
+        model = get_shared_sentence_transformer(DEFAULT_EMBED_MODEL, device=None)
 
     all_candidates: list[tuple[Any, float, str, list[Any]]] = []
 

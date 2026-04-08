@@ -27,11 +27,11 @@ for _noisy in ("httpx", "httpcore", "huggingface_hub", "urllib3"):
 
 import numpy as np
 from numpy.typing import NDArray
-from sentence_transformers import SentenceTransformer
 from sklearn.cluster import KMeans
 from sklearn.metrics import silhouette_score
 
 from common import DEFAULT_EMBED_MODEL
+from clustering.shared_st import get_shared_sentence_transformer
 
 warnings.filterwarnings("ignore", message=".*position_ids.*")
 
@@ -128,21 +128,7 @@ def embed_entities(
     else:
         texts = list(entity_list)
 
-    # Reduce HuggingFace Hub noise + avoid rate limits by authenticating
-    # when the user provides an HF token in Colab.
-    hf_token = os.environ.get("HF_TOKEN", "").strip() or os.environ.get(
-        "HUGGINGFACE_HUB_TOKEN", ""
-    ).strip()
-    if hf_token:
-        try:
-            model = SentenceTransformer(model_name, device=device, token=hf_token)
-        except TypeError:
-            # Backwards compatibility with older SentenceTransformers versions.
-            model = SentenceTransformer(
-                model_name, device=device, use_auth_token=hf_token
-            )
-    else:
-        model = SentenceTransformer(model_name, device=device)
+    model = get_shared_sentence_transformer(model_name, device=device)
     embeddings = model.encode(
         texts,
         batch_size=batch_size,
