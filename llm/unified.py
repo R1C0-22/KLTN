@@ -612,40 +612,50 @@ def _logprobs_huggingface(prompt: str, candidate_labels: list[str]) -> list[floa
                 model, tokenizer, base_input_ids, base_attention_mask, candidate_labels
             )
 
+        # Paper-faithful score: sum log p(label_token_j | prompt + previous label tokens)
+        # for all subword tokens in each numeric label ("1".."N").
+        # Performance note:
+        # - Old implementation did one full forward per *token* (very slow).
+        # - This implementation does one full forward per *candidate label* by
+        #   teacher-forcing prompt+label and reading aligned logits.
         logprob_scores: list[float] = []
+        prefix_len = int(base_input_ids.shape[1])
+
         for label in candidate_labels:
             cont_ids = tokenizer.encode(label, add_special_tokens=False)
             if not cont_ids:
                 logprob_scores.append(-1e9)
                 continue
 
-            cur_ids = base_input_ids.clone()
+            cont_tensor = torch.tensor([cont_ids], device=device, dtype=base_input_ids.dtype)
+            full_ids = torch.cat([base_input_ids, cont_tensor], dim=1)
+
             if base_attention_mask is not None:
-                cur_mask = base_attention_mask.clone()
+                cont_mask = torch.ones((1, len(cont_ids)), dtype=base_attention_mask.dtype, device=device)
+                full_mask = torch.cat([base_attention_mask, cont_mask], dim=1)
             else:
-                cur_mask = torch.ones_like(cur_ids, dtype=torch.long, device=device)
+                full_mask = torch.ones_like(full_ids, dtype=torch.long, device=device)
+
+            with torch.no_grad():
+                out = model(full_ids, attention_mask=full_mask)
+                # logits at position i predict token i+1
+                logp = torch.log_softmax(out.logits[0], dim=-1)
 
             total = 0.0
-            for tid in cont_ids:
+            valid = True
+            for j, tid in enumerate(cont_ids):
+                # predict first continuation token from final prompt position:
+                # target index in sequence = prefix_len + j
+                # corresponding logits row  = (prefix_len + j - 1)
+                row_idx = prefix_len + j - 1
                 tid_int = int(tid)
-                with torch.no_grad():
-                    out = model(cur_ids, attention_mask=cur_mask)
-                    logp = torch.log_softmax(out.logits[0, -1], dim=-1)
-                if tid_int >= logp.shape[0]:
-                    total = -1e9
-                    del out
+                if row_idx < 0 or row_idx >= logp.shape[0] or tid_int >= logp.shape[1]:
+                    valid = False
                     break
-                total += logp[tid_int].item()
-                del out
+                total += float(logp[row_idx, tid_int].item())
 
-                nxt = torch.tensor([[tid_int]], device=device, dtype=cur_ids.dtype)
-                cur_ids = torch.cat([cur_ids, nxt], dim=1)
-                cur_mask = torch.cat(
-                    [cur_mask, torch.ones((1, 1), device=device, dtype=cur_mask.dtype)],
-                    dim=1,
-                )
-
-            logprob_scores.append(total)
+            logprob_scores.append(total if valid else -1e9)
+            del out, logp, full_ids, full_mask, cont_tensor
 
         return logprob_scores
     finally:

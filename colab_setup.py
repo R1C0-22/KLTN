@@ -270,6 +270,10 @@ def setup(
     os.environ.setdefault("LLM_SCORE_CHUNK_SIZE", "24")
     # Cap events per calendar day before PDC — ICEWS days can have 1000+ events.
     os.environ.setdefault("LLM_SCORE_MAX_EVENTS_PER_TIMESTEP", "64")
+    # Enable local on-disk cache by default on Colab so repeated notebook runs
+    # (same prompts/candidates) do not recompute expensive HF forward passes.
+    # This keeps algorithm logic unchanged and only avoids redundant calls.
+    os.environ.setdefault("LLM_CACHE_DIR", "/content/llm_cache")
     # empty_cache() after every generate() is very slow on Colab; enable only if OOM.
     os.environ.setdefault("HF_CLEAR_GPU_CACHE", "0")
     os.environ["LLM_VERBOSE"] = "1" if verbose else "0"
@@ -309,6 +313,10 @@ def setup(
     _log(
         f"[setup] MAX_DTF_TIMESTEP_ITERATIONS={os.environ.get('MAX_DTF_TIMESTEP_ITERATIONS', '0')} "
         f"(PDC calls per query ≈ min(days, cap); set 0 for no cap)"
+    )
+    _log(
+        f"[setup] cache_dir={os.environ.get('LLM_CACHE_DIR', '(disabled)')} "
+        "(set empty to disable cache)"
     )
     _log(f"[setup] data={data_dir}")
 
