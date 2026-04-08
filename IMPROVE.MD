@@ -17,6 +17,9 @@ Báo cáo ablation mini
 w/o long-term, w/o short-term, w/o analogical (bạn đã có cấu trúc để làm).
 Đây là phần hội đồng rất hay hỏi.
 
+Colab / runtime (DTF cost)
+- Mỗi **ngày** (timestep) trong long-term pool gọi một lần PDC (`compute_scores_with_llm`). Entity “đông” có thể cần hàng trăm ngày → một query vài chục phút trên T4. Biến môi trường ``MAX_DTF_TIMESTEP_ITERATIONS`` (mặc định trong ``colab_setup.setup()``: 40; ``0`` = không giới hạn, chạy đúng paper nhưng rất chậm).
+
 Prediction §3.3 (đã chỉnh trong code)
 - Parse số chỉ mục 1..|Oq| trước khi khớp substring; ưu tiên dòng cuối / “answer is …” / ``[k]``; tránh chọn nhầm khi LLM sinh đoạn dài nhắc nhiều entity.
 - Giới hạn logprob path khi |Oq| rất lớn: env ``MAX_LOGPROB_CANDIDATES`` (mặc định 512), còn lại dùng generate + parse số.

@@ -291,6 +291,10 @@ def setup(
     os.environ["ADAPTIVE_CANDIDATES"] = "1" if adaptive_candidates else "0"
     os.environ.setdefault("ADAPTIVE_MIN_CANDIDATES", "3")
     os.environ.setdefault("DTF_ALPHA", "2.75")
+    # Dual history (§3.2): one LLM PDC call per calendar day processed until L is filled.
+    # Dense subjects can require 100+ days → 30+ minutes per query on T4. Cap timesteps for
+    # Colab notebooks; set to "0" for full paper-faithful DTF (slow overnight runs).
+    os.environ.setdefault("MAX_DTF_TIMESTEP_ITERATIONS", "40")
 
     clear_gpu_memory()
     
@@ -301,6 +305,10 @@ def setup(
     _log(
         f"[setup] history: short_term={short_term_l}, target_L={history_length} "
         f"(paper §6.1); adaptive_O2={adaptive_candidates}"
+    )
+    _log(
+        f"[setup] MAX_DTF_TIMESTEP_ITERATIONS={os.environ.get('MAX_DTF_TIMESTEP_ITERATIONS', '0')} "
+        f"(PDC calls per query ≈ min(days, cap); set 0 for no cap)"
     )
     _log(f"[setup] data={data_dir}")
 

@@ -497,13 +497,41 @@ def extract_dual_history(
     timestep_groups = _partition_by_timestep(long_term_pool)
     
     # Step 4-5: Retrieve backwards from tli-1 until sufficient length
-    # Paper: "We start retrieving from time step tli-1 in reverse chronological 
+    # Paper: "We start retrieving from time step tli-1 in reverse chronological
     #         order until the long-term history length is sufficient"
     long_term_selected: list[Any] = []
-    
-    for date_key, events in timestep_groups:
+
+    # Each timestep (calendar day) here triggers at least one full PDC scoring call
+    # (``compute_scores_with_llm``). Dense entities (e.g. heads of state) can span
+    # hundreds of days → hundreds of sequential LLM forwards on Colab (tens of minutes
+    # per query). Cap iterations for interactive runs; set ``0`` for paper-faithful
+    # unlimited passes (slow).
+    _raw_max_ts = os.environ.get("MAX_DTF_TIMESTEP_ITERATIONS", "0").strip()
+    try:
+        max_dtf_timesteps = int(_raw_max_ts)
+    except ValueError:
+        max_dtf_timesteps = 0
+
+    _verbose = os.environ.get("LLM_VERBOSE", "").strip().lower() in ("1", "true", "yes")
+
+    for ts_idx, (date_key, events) in enumerate(timestep_groups):
         if len(long_term_selected) >= target_long_term_len:
             break
+        if max_dtf_timesteps > 0 and ts_idx >= max_dtf_timesteps:
+            if _verbose:
+                print(
+                    f"[extract_dual_history] stopping DTF at timestep index {ts_idx} "
+                    f"(MAX_DTF_TIMESTEP_ITERATIONS={max_dtf_timesteps}); "
+                    f"collected {len(long_term_selected)}/{target_long_term_len} long-term events",
+                    flush=True,
+                )
+            break
+        if _verbose and ts_idx > 0 and ts_idx % 10 == 0:
+            print(
+                f"[extract_dual_history] DTF timestep {ts_idx} … "
+                f"long_term_selected={len(long_term_selected)}/{target_long_term_len}",
+                flush=True,
+            )
 
         scored_events = _cap_events_per_timestep(events)
         scores = compute_scores_with_llm(scored_events, query_event)
