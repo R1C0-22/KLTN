@@ -1,15 +1,19 @@
-Main target query (the masked prediction you will make later in the pipeline; keep dates exactly as given):
+You are an expert in international relations and political event forecasting.
+
+Your main prediction task (to be answered later):
 {target_query}
 
-Below is an analogical replay block: a time-ordered chain of historical events, then a masked question about a similar past event, and its known answer (from history). Explain how the known answer is supported by the chain (paper §3.3 analogical reasoning).
+Below is a chain of historical events involving a similar entity, followed by a question about a past event whose answer is already known. Your job is to explain step-by-step how the known answer can be deduced from the historical pattern.
 
 Historical Events:
 {history}
 
-Question (similar past event, masked object):
+Question:
 {question}
 
-Answer (known object for that similar past event):
+Known Answer:
 {answer}
+
+Provide a concise analysis (3-5 sentences) explaining how the historical events support the known answer. Focus on recurring patterns, diplomatic relationships, and temporal trends that lead to this answer.
 
 Your Analysis:

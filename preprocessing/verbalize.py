@@ -331,6 +331,23 @@ def verbalize_event(
     return f"On {date_str}, {_pretty_entity(s)} {verb_phrase} {_pretty_entity(o)}."
 
 
+def verbalize_masked_query(s: str, r: str, t: str) -> str:
+    """Verbalize a masked query ``(s, r, ?, t)`` as a natural-language question.
+
+    Avoids the double-``??`` that occurs when ``verbalize_event`` already puts
+    ``?`` as the object and the caller naively replaces the trailing ``.`` with
+    ``?``.  Uses ``whom?`` for entity objects (standard in TKG) or ``what?``
+    when the relation ends with *about*.
+
+    >>> verbalize_masked_query("China", "meet", "2014-01-01")
+    'On 1 January 2014, China met whom?'
+    """
+    sentence = verbalize_event(s, r, "?", t).rstrip(".")
+    if sentence.lower().endswith(" about ?"):
+        return re.sub(r"\s*\?\s*$", " what?", sentence)
+    return re.sub(r"\s*\?\s*$", " whom?", sentence)
+
+
 def build_corpus(
     data: Sequence[Quadruple] | Sequence[tuple[str, str, str, str]],
     *,

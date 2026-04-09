@@ -48,7 +48,7 @@ class AnalogicalExample:
         
         Follows the format in Table 9 (OEP prompt template).
         """
-        from preprocessing import verbalize_event
+        from preprocessing import verbalize_event, verbalize_masked_query
         
         history_lines = []
         for ev in self.history:
@@ -56,9 +56,7 @@ class AnalogicalExample:
             history_lines.append(verbalize_event(s, r, o, t))
         
         es, er, eo, et = event_fields(self.event)
-        question = verbalize_event(es, er, "?", et)
-        if question.endswith("."):
-            question = question[:-1] + "?"
+        question = verbalize_masked_query(es, er, et)
         
         return f"""Analogical Example {example_num}:
 Historical Events:
@@ -154,10 +152,8 @@ def generate_analysis_process(
     history_text = "\n".join(history_lines) if history_lines else "- none -"
 
     s, r, o, t = event_fields(similar_event)
-    from preprocessing import verbalize_event
-    question_text = verbalize_event(s, r, "?", t)
-    if question_text.endswith("."):
-        question_text = question_text[:-1] + "?"
+    from preprocessing import verbalize_masked_query
+    question_text = verbalize_masked_query(s, r, t)
 
     prompt = prompt_template.format(
         target_query=tq,

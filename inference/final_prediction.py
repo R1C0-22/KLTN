@@ -129,11 +129,8 @@ def _load_history_data(query_event: Any) -> list[Any]:
 
 def _verbalize_query_masked(s: str, r: str, t: str) -> str:
     """Create a masked query sentence for prediction."""
-    from preprocessing import verbalize_event
-    sentence = verbalize_event(s, r, "?", t)
-    if sentence.endswith("."):
-        sentence = sentence[:-1] + "?"
-    return sentence
+    from preprocessing import verbalize_masked_query
+    return verbalize_masked_query(s, r, t)
 
 
 def _extract_predicted_object(llm_output: str, candidates: Sequence[str]) -> str:

@@ -97,31 +97,11 @@ def _load_llm_scorer_from_env() -> Any:
 
 
 def _make_question_from_query_event(query_event: Any) -> str:
-    """
-    Create a natural-language question like the paper's Figure 8.
+    """Create a natural-language question like the paper's Figure 8."""
+    from preprocessing import verbalize_masked_query
 
-    Input query_event should represent a masked query (s, r, ?, t).
-    We generate a sentence via `preprocessing.verbalize_event` then convert it to a question.
-    """
-    from preprocessing import verbalize_event
-
-    s, r, o, t = _extract_event_fields(query_event)
-    # Force mask for safety
-    masked_sentence = verbalize_event(s, r, "?", t).strip()
-    if masked_sentence.endswith("."):
-        masked_sentence = masked_sentence[:-1]
-
-    # Convert the tail "... ?" into "... whom?" (or "... what?").
-    # We avoid slice-based string replacement (which can drop the needed
-    # whitespace, producing tokens like "endorsedwhom?").
-    import re
-
-    lower = masked_sentence.lower()
-    if lower.endswith(" about ?"):
-        return re.sub(r"\s*\?\s*$", " what?", masked_sentence, flags=re.I)
-
-    # Default: objects are entities in TKG => "whom?"
-    return re.sub(r"\s*\?\s*$", " whom?", masked_sentence, flags=re.I)
+    s, r, _o, t = _extract_event_fields(query_event)
+    return verbalize_masked_query(s, r, t)
 
 
 def _compute_scores_one_chunk(
