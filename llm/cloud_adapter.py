@@ -149,6 +149,12 @@ def score_fn(prompt: str, events: Sequence[Any]) -> List[float]:
     else:
         n_ev = len(events)
         score_limit = str(_effective_score_max_new_tokens(n_ev))
+        if os.environ.get("LLM_VERBOSE", "").strip().lower() in ("1", "true", "yes"):
+            print(
+                f"[llm] score_fn: n_events={n_ev} HF_MAX_NEW_TOKENS={score_limit} "
+                f"prompt_chars={len(prompt)}",
+                flush=True,
+            )
         saved_tok = os.environ.get("HF_MAX_NEW_TOKENS")
         os.environ["HF_MAX_NEW_TOKENS"] = score_limit
         try:

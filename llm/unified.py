@@ -75,6 +75,7 @@ def _hf_drop_fixed_max_length(model: Any) -> None:
 
 _hf_model: Any = None
 _hf_tokenizer: Any = None
+_hf_logged_first_generate: bool = False
 
 
 # ---------------------------------------------------------------------------
@@ -331,6 +332,15 @@ def _call_huggingface(prompt: str) -> str:
     if attention_mask is not None:
         attention_mask = attention_mask.to(device)
 
+    global _hf_logged_first_generate
+    if not _hf_logged_first_generate:
+        _hf_logged_first_generate = True
+        _log(
+            "[llm] First generate() starting — this can sit silently for several minutes on T4 "
+            "(long PDC prompts, many DTF timesteps). "
+            "Set LLM_VERBOSE=1 for per-call logs; cap DTF with MAX_DTF_TIMESTEP_ITERATIONS "
+            f"(current {os.environ.get('MAX_DTF_TIMESTEP_ITERATIONS', '0')!r}; 0 = unlimited, slow)."
+        )
     if verbose:
         _log(f"[llm] Generating (input={input_ids.shape[1]} tokens, max_new={max_new})...")
 
