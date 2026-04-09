@@ -56,7 +56,8 @@ def main() -> None:
     wo_long_term = _run_one(
         "w/o long-term",
         {
-            "HISTORY_LENGTH_L": os.environ.get("SHORT_TERM_L", "20"),
+            "DISABLE_LONG_TERM": "1",
+            "DISABLE_SHORT_TERM": "0",
             "NUM_ANALOGICAL_EXAMPLES": os.environ.get("NUM_ANALOGICAL_EXAMPLES", "1"),
         },
         n_queries=n_queries,
@@ -66,7 +67,8 @@ def main() -> None:
     wo_short_term = _run_one(
         "w/o short-term",
         {
-            "SHORT_TERM_L": "0",
+            "DISABLE_SHORT_TERM": "1",
+            "DISABLE_LONG_TERM": "0",
             "NUM_ANALOGICAL_EXAMPLES": os.environ.get("NUM_ANALOGICAL_EXAMPLES", "1"),
         },
         n_queries=n_queries,
@@ -77,7 +79,8 @@ def main() -> None:
         "w/o analogical",
         {
             "NUM_ANALOGICAL_EXAMPLES": "0",
-            "SHORT_TERM_L": os.environ.get("SHORT_TERM_L", "20"),
+            "DISABLE_SHORT_TERM": "0",
+            "DISABLE_LONG_TERM": "0",
         },
         n_queries=n_queries,
         sample_size=sample_size,

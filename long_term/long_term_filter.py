@@ -469,13 +469,33 @@ def extract_dual_history(
         Short-term and long-term histories, both in chronological order
     """
     from short_term import get_short_term
-    
+
+    # Evaluation toggles for ablation scripts:
+    # - DISABLE_SHORT_TERM=1: force HS = []
+    # - DISABLE_LONG_TERM=1: force HL = []
+    # They are optional and keep default paper behavior when unset.
+    disable_short = os.environ.get("DISABLE_SHORT_TERM", "").strip().lower() in {
+        "1",
+        "true",
+        "yes",
+        "on",
+    }
+    disable_long = os.environ.get("DISABLE_LONG_TERM", "").strip().lower() in {
+        "1",
+        "true",
+        "yes",
+        "on",
+    }
+
     # Step 1: Get short-term history (last l events)
-    short_term = get_short_term(full_history, l=l)
+    short_term = [] if disable_short else get_short_term(full_history, l=l)
     
     # Step 2: HL = Hi - HS (subtract short-term from full history)
     long_term_pool = subtract_short_term(full_history, short_term)
     
+    if disable_long:
+        return short_term, []
+
     if not long_term_pool:
         return short_term, []
     
