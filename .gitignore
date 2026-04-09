@@ -3,6 +3,12 @@ __pycache__/
 *.pyc
 *.pyo
 
+# Local notes (not part of the codebase)
+IMPROVE.MD
+REQUESTS.MD
+CHAT_SUMMARY.md
+output.txt
+
 # Colab / runtime artifacts
 .llm_cache/
 llm_cache/
