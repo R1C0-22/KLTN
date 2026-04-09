@@ -14,7 +14,7 @@ duplicate timestamp format lists scattered around the codebase.
 """
 
 from datetime import datetime, timedelta
-from typing import Any, Tuple
+from typing import Any
 
 
 def event_fields(event: Any) -> tuple[str, str, str, str]:
@@ -62,12 +62,14 @@ def parse_timestamp(ts: str) -> datetime | None:
     Returns `datetime` or None if parsing fails.
     """
     ts = str(ts).strip()
-    # ICEWS/GDELT preprocessing in this repo sometimes keeps time as an
-    # integer snapshot id (e.g. "0", "12", ...). Treat those as ordered
-    # timesteps by mapping them to a monotonically increasing datetime.
+    # ICEWS/GDELT preprocessing in this repo often stores timestamp as
+    # integer snapshot ids (e.g. "0", "12", "3243"), where each unit is
+    # a discrete timestep. Mapping them as *seconds* collapses many events
+    # into the same day (1970-01-01), which breaks day/timestep grouping in
+    # DTF. Use day offsets so each snapshot stays in its own timestep.
     if ts.isdigit():
-        seconds = int(ts)
-        return datetime(1970, 1, 1) + timedelta(seconds=seconds)
+        day_offset = int(ts)
+        return datetime(1970, 1, 1) + timedelta(days=day_offset)
     for fmt in (
         "%Y-%m-%d",
         "%Y/%m/%d",
