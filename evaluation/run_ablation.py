@@ -13,29 +13,13 @@ Usage:
 from __future__ import annotations
 
 import os
-from contextlib import contextmanager
-from typing import Iterator
 
 from colab_setup import test_prediction_metrics
-
-
-@contextmanager
-def _patched_env(patch: dict[str, str]) -> Iterator[None]:
-    old = {k: os.environ.get(k) for k in patch}
-    try:
-        for k, v in patch.items():
-            os.environ[k] = v
-        yield
-    finally:
-        for k, v in old.items():
-            if v is None:
-                os.environ.pop(k, None)
-            else:
-                os.environ[k] = v
+from evaluation.runtime import ensure_eval_runtime, patched_env
 
 
 def _run_one(name: str, env_patch: dict[str, str], n_queries: int, sample_size: int) -> dict:
-    with _patched_env(env_patch):
+    with patched_env(env_patch):
         result = test_prediction_metrics(
             n_queries=n_queries,
             sample_size=sample_size,
@@ -53,6 +37,8 @@ def _run_one(name: str, env_patch: dict[str, str], n_queries: int, sample_size: 
 
 
 def main() -> None:
+    ensure_eval_runtime()
+
     n_queries = int(os.environ.get("ABLATION_N_QUERIES", "20"))
     sample_size = int(os.environ.get("ABLATION_CLUSTER_SAMPLE", "500"))
 

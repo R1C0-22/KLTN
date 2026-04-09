@@ -13,26 +13,10 @@ Usage:
 from __future__ import annotations
 
 import os
-from contextlib import contextmanager
 from itertools import product
-from typing import Iterator
 
 from colab_setup import test_prediction_metrics
-
-
-@contextmanager
-def _patched_env(patch: dict[str, str]) -> Iterator[None]:
-    old = {k: os.environ.get(k) for k in patch}
-    try:
-        for k, v in patch.items():
-            os.environ[k] = v
-        yield
-    finally:
-        for k, v in old.items():
-            if v is None:
-                os.environ.pop(k, None)
-            else:
-                os.environ[k] = v
+from evaluation.runtime import ensure_eval_runtime, patched_env
 
 
 def _parse_list_env(name: str, default_csv: str) -> list[str]:
@@ -42,6 +26,8 @@ def _parse_list_env(name: str, default_csv: str) -> list[str]:
 
 
 def main() -> None:
+    ensure_eval_runtime()
+
     n_queries = int(os.environ.get("SWEEP_N_QUERIES", "10"))
     sample_size = int(os.environ.get("SWEEP_CLUSTER_SAMPLE", "500"))
 
@@ -56,7 +42,7 @@ def main() -> None:
             "SHORT_TERM_L": l,
             "DTF_ALPHA": alpha,
         }
-        with _patched_env(patch):
+        with patched_env(patch):
             result = test_prediction_metrics(
                 n_queries=n_queries,
                 sample_size=sample_size,
