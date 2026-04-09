@@ -29,6 +29,7 @@ from pathlib import Path
 from typing import Any, Callable, Sequence
 
 from common import event_fields
+from llm.response_cache import cache_get, cache_set
 
 
 @dataclass
@@ -108,43 +109,10 @@ def _load_llm_generator_from_env() -> Callable[[str], str]:
     return fn
 
 
-def _model_fingerprint() -> str:
-    provider = (os.environ.get("LLM_PROVIDER") or "").strip().lower()
-    model = (
-        os.environ.get("HF_MODEL_ID")
-        or os.environ.get("OPENAI_MODEL")
-        or os.environ.get("GROQ_MODEL")
-        or ""
-    ).strip()
-    return f"{provider}:{model}"
-
-
 def _history_hash(history: Sequence[Any]) -> str:
     payload = [event_fields(ev) for ev in history]
     raw = json.dumps(payload, ensure_ascii=False)
     return hashlib.sha256(raw.encode("utf-8")).hexdigest()
-
-
-def _cache_get(cache_key: str) -> str | None:
-    cache_dir = os.environ.get("TKG_CACHE_DIR", "").strip()
-    if not cache_dir:
-        return None
-    p = Path(cache_dir) / "analogical"
-    p.mkdir(parents=True, exist_ok=True)
-    fp = p / f"{cache_key}.txt"
-    if not fp.is_file():
-        return None
-    return fp.read_text(encoding="utf-8")
-
-
-def _cache_set(cache_key: str, value: str) -> None:
-    cache_dir = os.environ.get("TKG_CACHE_DIR", "").strip()
-    if not cache_dir:
-        return
-    p = Path(cache_dir) / "analogical"
-    p.mkdir(parents=True, exist_ok=True)
-    fp = p / f"{cache_key}.txt"
-    fp.write_text(value, encoding="utf-8")
 
 
 def generate_analysis_process(
@@ -200,10 +168,8 @@ def generate_analysis_process(
     
     query_key = question_text.strip()
     hist_key = _history_hash(history)
-    model_key = _model_fingerprint()
-    cache_body = f"{query_key}\n{hist_key}\n{model_key}\n{ground_truth_answer.strip()}"
-    cache_key = hashlib.sha256(cache_body.encode("utf-8")).hexdigest()
-    cached = _cache_get(cache_key)
+    cache_body = f"{query_key}\n{hist_key}\n{ground_truth_answer.strip()}"
+    cached = cache_get("generate", cache_body)
     if cached is not None:
         return cached.strip()
 
@@ -216,7 +182,7 @@ def generate_analysis_process(
         analysis = str(analysis)
     
     text = analysis.strip()
-    _cache_set(cache_key, text)
+    cache_set("generate", cache_body, text)
     return text
 
 

@@ -33,6 +33,7 @@ from pathlib import Path
 from typing import Any, Sequence
 
 from common import event_fields, parse_timestamp
+from llm.response_cache import cache_get, cache_set
 
 
 def _extract_event_fields(event: Any) -> tuple[str, str, str, str]:
@@ -159,51 +160,12 @@ def _compute_scores_one_chunk(
     return [float(x) for x in logits]
 
 
-def _model_fingerprint() -> str:
-    provider = (os.environ.get("LLM_PROVIDER") or "").strip().lower()
-    model = (
-        os.environ.get("HF_MODEL_ID")
-        or os.environ.get("OPENAI_MODEL")
-        or os.environ.get("GROQ_MODEL")
-        or ""
-    ).strip()
-    return f"{provider}:{model}"
-
-
 def _history_hash(history_chunk: Sequence[Any]) -> str:
     payload = []
     for ev in history_chunk:
         payload.append(_extract_event_fields(ev))
     body = json.dumps(payload, ensure_ascii=False, sort_keys=False)
     return hashlib.sha256(body.encode("utf-8")).hexdigest()
-
-
-def _cache_get(cache_key: str) -> list[float] | None:
-    cache_dir = os.environ.get("TKG_CACHE_DIR", "").strip()
-    if not cache_dir:
-        return None
-    p = Path(cache_dir) / "long_term"
-    p.mkdir(parents=True, exist_ok=True)
-    fp = p / f"{cache_key}.json"
-    if not fp.is_file():
-        return None
-    try:
-        data = json.loads(fp.read_text(encoding="utf-8"))
-        if isinstance(data, list):
-            return [float(x) for x in data]
-    except Exception:
-        return None
-    return None
-
-
-def _cache_set(cache_key: str, values: Sequence[float]) -> None:
-    cache_dir = os.environ.get("TKG_CACHE_DIR", "").strip()
-    if not cache_dir:
-        return
-    p = Path(cache_dir) / "long_term"
-    p.mkdir(parents=True, exist_ok=True)
-    fp = p / f"{cache_key}.json"
-    fp.write_text(json.dumps(list(values), ensure_ascii=False), encoding="utf-8")
 
 
 def compute_scores_with_llm(history: Sequence[Any], query_event: Any) -> list[float]:
@@ -247,25 +209,28 @@ def compute_scores_with_llm(history: Sequence[Any], query_event: Any) -> list[fl
     prompt_template = _load_prompt_template()
     score_fn = _load_llm_scorer_from_env()
     query_text = _make_question_from_query_event(query_event)
-    model_fp = _model_fingerprint()
 
     all_logits: list[float] = []
     for start in range(0, len(history), chunk_size):
         chunk = history[start : start + chunk_size]
         h_hash = _history_hash(chunk)
-        cache_body = f"{query_text}\n{h_hash}\n{model_fp}\n{len(chunk)}"
-        cache_key = hashlib.sha256(cache_body.encode("utf-8")).hexdigest()
-        cached = _cache_get(cache_key)
-        if cached is not None and len(cached) == len(chunk):
-            all_logits.extend(cached)
-            continue
+        cache_body = f"{query_text}\n{h_hash}\n{len(chunk)}"
+        cached_raw = cache_get("score", cache_body)
+        if cached_raw is not None:
+            try:
+                cached = json.loads(cached_raw)
+                if isinstance(cached, list) and len(cached) == len(chunk):
+                    all_logits.extend(float(x) for x in cached)
+                    continue
+            except Exception:
+                pass
         logits = _compute_scores_one_chunk(
             chunk,
             query_event,
             prompt_template=prompt_template,
             score_fn=score_fn,
         )
-        _cache_set(cache_key, logits)
+        cache_set("score", cache_body, json.dumps(logits, ensure_ascii=False))
         all_logits.extend(logits)
 
     return all_logits
