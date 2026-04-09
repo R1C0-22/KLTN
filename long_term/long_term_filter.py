@@ -28,10 +28,9 @@ import json
 import math
 import os
 import hashlib
-from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
-from typing import Any, Iterable, Sequence
+from typing import Any, Sequence
 
 from common import event_fields, parse_timestamp
 
