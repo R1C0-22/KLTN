@@ -294,6 +294,9 @@ def setup(
     os.environ.setdefault("MIN_HISTORY_CONTEXTS", "300")
     os.environ["ADAPTIVE_CANDIDATES"] = "1" if adaptive_candidates else "0"
     os.environ.setdefault("ADAPTIVE_MIN_CANDIDATES", "3")
+    # Optional second adaptive gate (disabled by default):
+    # if top-1 probability < threshold, retry with O²q. Set >0 to enable.
+    os.environ.setdefault("ADAPTIVE_CONFIDENCE_THRESHOLD", "0")
     os.environ.setdefault("DTF_ALPHA", "2.75")
     # Dual history (§3.2): one LLM PDC call per calendar day processed until L is filled.
     # Dense subjects can require 100+ days → 30+ minutes per query on T4. Cap timesteps for
