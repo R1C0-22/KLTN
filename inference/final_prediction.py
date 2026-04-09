@@ -327,6 +327,7 @@ def _prepare_prediction_context(
         query_event=masked_query,
         l=l,
         L=L,
+        alpha=dtf_alpha,
     )
     history_q = combine_dual_history(short_term_q, long_term_q)
     
