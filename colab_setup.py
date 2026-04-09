@@ -516,11 +516,13 @@ def test_prediction_metrics(
         os.environ["MAX_DTF_TIMESTEP_ITERATIONS"] = "10" if is_t4 else "40"
 
     if gpu_name:
+        use_logprob = _env_truthy("USE_LOGPROB_PREDICTION", default=False)
         _log(
             f"[test_prediction_metrics] GPU={gpu_name} "
             f"(chunk={os.environ.get('LLM_SCORE_CHUNK_SIZE')}, "
             f"cap_per_day={os.environ.get('LLM_SCORE_MAX_EVENTS_PER_TIMESTEP')}, "
-            f"max_dtf_days={os.environ.get('MAX_DTF_TIMESTEP_ITERATIONS')})"
+            f"max_dtf_days={os.environ.get('MAX_DTF_TIMESTEP_ITERATIONS')}, "
+            f"use_logprob={use_logprob})"
         )
 
     from preprocessing import load_dataset

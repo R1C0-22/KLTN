@@ -502,9 +502,18 @@ def predict_next_object_with_probs(
         query_event, cluster_result, use_second_order_candidates
     )
     
+    # Keep the same provider-aware policy as `predict_next_object()`:
+    # - OpenAI/Groq: default logprob path (paper-faithful)
+    # - Local HF: default generation path (much faster on Colab T4)
+    # Users can force behavior via USE_LOGPROB_PREDICTION=1/0.
+    use_logprobs = _should_use_logprob_prediction()
     max_logprob_candidates = _max_logprob_candidates()
 
-    if ctx.candidate_set and len(ctx.candidate_set) <= max_logprob_candidates:
+    if (
+        use_logprobs
+        and ctx.candidate_set
+        and len(ctx.candidate_set) <= max_logprob_candidates
+    ):
         try:
             predictor_logprobs = _load_callable_from_env("LLM_PREDICTOR_LOGPROBS")
             predicted, probabilities = predictor_logprobs(
