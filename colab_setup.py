@@ -405,27 +405,36 @@ def test_analogical(max_chars: int = 0) -> str:
 
 
 def test_scoring(n: int = 5) -> list[float]:
-    """Test 3: LLM scoring for long-term filtering (paper §3.2 PDC)."""
+    """Test 3: LLM scoring for long-term filtering (paper §3.2 PDC).
+
+    Temporarily disables the disk cache so the test always exercises
+    the real LLM path (a cached 0.0s result proves nothing).
+    """
     from preprocessing import load_dataset
     from long_term.long_term_filter import compute_scores_with_llm
-    
+
     data_dir = os.environ.get("TKG_DATA_DIR", DEFAULT_DATA_DIR)
     hist = load_dataset(data_dir, splits=["train"])[:n]
     query = (hist[0].subject, hist[0].relation, "?", hist[0].timestamp)
-    
+
     _log(f"[test_scoring] query={query}")
     _log(f"[test_scoring] n_events={n}")
-    
-    with _timer("test_scoring"):
-        scores = compute_scores_with_llm(hist, query)
-    
+
+    saved_cache = os.environ.pop("LLM_CACHE_DIR", None)
+    try:
+        with _timer("test_scoring"):
+            scores = compute_scores_with_llm(hist, query)
+    finally:
+        if saved_cache is not None:
+            os.environ["LLM_CACHE_DIR"] = saved_cache
+
     _log(f"[test_scoring] scores={scores}")
-    
+
     if scores and all(s == 0.0 for s in scores):
         _log("[test_scoring] WARNING: all scores are 0.0 - LLM may not output proper logits")
     elif scores and any(s != 0.0 for s in scores):
         _log("[test_scoring] OK: scores have variance (LLM scoring works)")
-    
+
     return scores
 
 
