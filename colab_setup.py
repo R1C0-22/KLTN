@@ -349,6 +349,7 @@ def _timer(name: str):
     class Timer:
         def __enter__(self):
             self.start = time.time()
+            _log(f"[{name}] starting...")
             return self
         def __exit__(self, *args):
             elapsed = time.time() - self.start
@@ -488,6 +489,40 @@ def test_prediction_metrics(
     start_index
         Offset into the validation split (default 0 = same first query as legacy ``test_prediction``).
     """
+    # If the notebook calls this function directly (without `setup()`),
+    # we still want sane defaults that match `IMPROVE.MD` guidance.
+    #
+    # IMPORTANT: On Colab T4, paper-faithful DTF can take tens of minutes per query
+    # because each timestep triggers multiple sequential LLM forwards.
+    os.environ.setdefault("LLM_PROVIDER", "hf")
+    os.environ.setdefault("LLM_VERBOSE", "1")
+
+    # Pick conservative defaults for T4 unless the user already set env vars.
+    gpu_name = ""
+    try:
+        import torch
+
+        if torch.cuda.is_available():
+            gpu_name = torch.cuda.get_device_name(0) or ""
+    except Exception:
+        gpu_name = ""
+
+    is_t4 = "t4" in gpu_name.lower()
+    if "LLM_SCORE_CHUNK_SIZE" not in os.environ:
+        os.environ["LLM_SCORE_CHUNK_SIZE"] = "16" if is_t4 else "24"
+    if "LLM_SCORE_MAX_EVENTS_PER_TIMESTEP" not in os.environ:
+        os.environ["LLM_SCORE_MAX_EVENTS_PER_TIMESTEP"] = "32" if is_t4 else "64"
+    if "MAX_DTF_TIMESTEP_ITERATIONS" not in os.environ:
+        os.environ["MAX_DTF_TIMESTEP_ITERATIONS"] = "10" if is_t4 else "40"
+
+    if gpu_name:
+        _log(
+            f"[test_prediction_metrics] GPU={gpu_name} "
+            f"(chunk={os.environ.get('LLM_SCORE_CHUNK_SIZE')}, "
+            f"cap_per_day={os.environ.get('LLM_SCORE_MAX_EVENTS_PER_TIMESTEP')}, "
+            f"max_dtf_days={os.environ.get('MAX_DTF_TIMESTEP_ITERATIONS')})"
+        )
+
     from preprocessing import load_dataset
     from inference.final_prediction import get_prediction_context, predict_next_object_with_probs
     from clustering.entity_cluster import cluster_entities, extract_entities

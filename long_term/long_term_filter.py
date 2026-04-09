@@ -526,14 +526,19 @@ def extract_dual_history(
                     flush=True,
                 )
             break
-        if _verbose and ts_idx > 0 and ts_idx % 10 == 0:
+        scored_events = _cap_events_per_timestep(events)
+        if _verbose:
+            # Per-timestep progress is critical on Colab T4, where a single timestep
+            # can take minutes due to multiple sequential LLM forwards.
+            chunk = os.environ.get("LLM_SCORE_CHUNK_SIZE", "32")
+            cap = os.environ.get("LLM_SCORE_MAX_EVENTS_PER_TIMESTEP", "64")
             print(
-                f"[extract_dual_history] DTF timestep {ts_idx} … "
-                f"long_term_selected={len(long_term_selected)}/{target_long_term_len}",
+                f"[extract_dual_history] timestep={ts_idx} date={date_key} "
+                f"events={len(events)} capped={len(scored_events)} "
+                f"(chunk={chunk}, cap_per_day={cap}) "
+                f"selected={len(long_term_selected)}/{target_long_term_len}",
                 flush=True,
             )
-
-        scored_events = _cap_events_per_timestep(events)
         scores = compute_scores_with_llm(scored_events, query_event)
 
         F = len(scored_events)
