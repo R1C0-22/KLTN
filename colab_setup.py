@@ -526,7 +526,7 @@ def test_prediction_metrics(
         )
 
     from preprocessing import load_dataset
-    from inference.final_prediction import get_prediction_context, predict_next_object_with_probs
+    from inference.final_prediction import get_prediction_context, predict_from_context
     from clustering.entity_cluster import cluster_entities, extract_entities
 
     data_dir = os.environ.get("TKG_DATA_DIR", DEFAULT_DATA_DIR)
@@ -600,7 +600,7 @@ def test_prediction_metrics(
             f"used_second_order={getattr(ctx, 'used_second_order_neighbors', False)}"
         )
         with _timer(f"prediction[{idx}]"):
-            res = predict_next_object_with_probs(query, cluster_result, use_second_order)
+            res = predict_from_context(ctx)
         pred = res.predicted.strip()
         last_prediction = pred
         evaluated += 1

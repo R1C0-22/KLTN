@@ -255,6 +255,8 @@ class _PredictionContext:
     candidate_set: list[str]
     final_prompt: str
     used_second_order_neighbors: bool = False
+    query_event: Any = None
+    cluster_result: Any = None
 
 
 def _prepare_prediction_context(
@@ -379,6 +381,8 @@ def _prepare_prediction_context(
         candidate_set=candidate_set,
         final_prompt=final_prompt,
         used_second_order_neighbors=used_o2,
+        query_event=query_event,
+        cluster_result=cluster_result,
     )
 
 
@@ -413,66 +417,12 @@ def predict_next_object(
     use_second_order_candidates: bool = False,
 ) -> str:
     """Predict the missing object entity for a query (s, r, ?, t).
-    
+
     Implements Algorithm 1 from the AnRe paper.
-    
-    Parameters
-    ----------
-    query_event : Any
-        Query as (subject, relation, "?", timestamp)
-    cluster_result : ClusterResult, optional
-        Pre-computed clustering result. If None, clustering is performed.
-    use_second_order_candidates : bool
-        If True, use O²q (second-order neighbors) as candidate set.
-        Default False uses Oq (first-order only).
-    
-    Returns
-    -------
-    str
-        The predicted object entity
     """
-    def _infer_once(ctx: _PredictionContext) -> tuple[str, float | None]:
-        use_logprobs = _should_use_logprob_prediction()
-        max_logprob_candidates = _max_logprob_candidates()
-
-        if (
-            use_logprobs
-            and ctx.candidate_set
-            and len(ctx.candidate_set) <= max_logprob_candidates
-        ):
-            try:
-                predictor_logprobs = _load_callable_from_env("LLM_PREDICTOR_LOGPROBS")
-                predicted, probs = predictor_logprobs(ctx.final_prompt, ctx.candidate_set)
-                conf = max(probs) if probs else None
-                return predicted, conf
-            except Exception:
-                pass
-
-        predictor_spec = os.environ.get("LLM_PREDICTOR", "").strip()
-        if predictor_spec:
-            predictor = _load_callable_from_env("LLM_PREDICTOR")
-        else:
-            predictor = _load_callable_from_env("LLM_GENERATOR")
-        llm_output = predictor(ctx.final_prompt)
-        return _extract_predicted_object(str(llm_output), ctx.candidate_set), None
-
     ctx = _prepare_prediction_context(query_event, cluster_result, use_second_order_candidates)
-    predicted, conf = _infer_once(ctx)
-
-    conf_threshold = _low_confidence_threshold()
-    should_retry_o2 = (
-        conf_threshold > 0.0
-        and conf is not None
-        and conf < conf_threshold
-        and not use_second_order_candidates
-        and not ctx.used_second_order_neighbors
-    )
-    if should_retry_o2:
-        ctx_o2 = _prepare_prediction_context(query_event, cluster_result, True)
-        predicted_o2, _ = _infer_once(ctx_o2)
-        return predicted_o2
-
-    return predicted
+    result = predict_from_context(ctx)
+    return result.predicted
 
 
 @dataclass
@@ -504,72 +454,70 @@ class PredictionResult:
         return ground_truth in top_k
 
 
+def _infer_from_context(ctx: _PredictionContext) -> PredictionResult:
+    """Run the LLM prediction step on a pre-built context (no context rebuild)."""
+    use_logprobs = _should_use_logprob_prediction()
+    max_lp = _max_logprob_candidates()
+
+    if use_logprobs and ctx.candidate_set and len(ctx.candidate_set) <= max_lp:
+        try:
+            predictor_logprobs = _load_callable_from_env("LLM_PREDICTOR_LOGPROBS")
+            predicted, probabilities = predictor_logprobs(
+                ctx.final_prompt, ctx.candidate_set
+            )
+            return PredictionResult(
+                predicted=predicted,
+                candidates=ctx.candidate_set,
+                probabilities=probabilities,
+            )
+        except Exception:
+            pass
+
+    predictor = _load_callable_from_env("LLM_GENERATOR")
+    llm_output = predictor(ctx.final_prompt)
+    predicted = _extract_predicted_object(str(llm_output), ctx.candidate_set)
+    probabilities = [1.0 if c == predicted else 0.0 for c in ctx.candidate_set]
+    return PredictionResult(
+        predicted=predicted,
+        candidates=ctx.candidate_set,
+        probabilities=probabilities,
+    )
+
+
+def predict_from_context(ctx: _PredictionContext) -> PredictionResult:
+    """Predict using an already-built context (avoids duplicate pipeline work).
+
+    Use when ``get_prediction_context`` was already called (e.g. to inspect
+    O_q before running the LLM).  Supports the adaptive O²_q retry.
+    """
+    result = _infer_from_context(ctx)
+
+    conf_threshold = _low_confidence_threshold()
+    best_conf = max(result.probabilities) if result.probabilities else 0.0
+    if (
+        conf_threshold > 0.0
+        and best_conf < conf_threshold
+        and not ctx.used_second_order_neighbors
+    ):
+        ctx_o2 = _prepare_prediction_context(
+            ctx.query_event, ctx.cluster_result, use_second_order_candidates=True
+        )
+        return _infer_from_context(ctx_o2)
+
+    return result
+
+
 def predict_next_object_with_probs(
     query_event: Any,
     cluster_result=None,
     use_second_order_candidates: bool = False,
 ) -> PredictionResult:
     """Predict with full probability distribution for Hit@k evaluation.
-    
-    This function implements the paper's complete prediction approach
-    including probability distribution computation (Paper §3.3).
-    
-    Returns
-    -------
-    PredictionResult
-        Contains predicted entity, all candidates, and their probabilities
+
+    Paper §3.3: map candidates to indices, get logprobs, softmax, argmax.
     """
-    def _infer_once(ctx: _PredictionContext) -> PredictionResult:
-        # Keep provider-aware policy:
-        # - OpenAI/Groq: default logprob path (paper-faithful)
-        # - Local HF: default generation path (faster on Colab T4)
-        use_logprobs = _should_use_logprob_prediction()
-        max_logprob_candidates = _max_logprob_candidates()
-
-        if (
-            use_logprobs
-            and ctx.candidate_set
-            and len(ctx.candidate_set) <= max_logprob_candidates
-        ):
-            try:
-                predictor_logprobs = _load_callable_from_env("LLM_PREDICTOR_LOGPROBS")
-                predicted, probabilities = predictor_logprobs(
-                    ctx.final_prompt, ctx.candidate_set
-                )
-                return PredictionResult(
-                    predicted=predicted,
-                    candidates=ctx.candidate_set,
-                    probabilities=probabilities,
-                )
-            except Exception:
-                pass
-
-        predictor = _load_callable_from_env("LLM_GENERATOR")
-        llm_output = predictor(ctx.final_prompt)
-        predicted = _extract_predicted_object(str(llm_output), ctx.candidate_set)
-        probabilities = [1.0 if c == predicted else 0.0 for c in ctx.candidate_set]
-        return PredictionResult(
-            predicted=predicted,
-            candidates=ctx.candidate_set,
-            probabilities=probabilities,
-        )
-
     ctx = _prepare_prediction_context(query_event, cluster_result, use_second_order_candidates)
-    result = _infer_once(ctx)
-
-    conf_threshold = _low_confidence_threshold()
-    best_conf = max(result.probabilities) if result.probabilities else 0.0
-    should_retry_o2 = (
-        conf_threshold > 0.0
-        and best_conf < conf_threshold
-        and not use_second_order_candidates
-        and not ctx.used_second_order_neighbors
-    )
-    if should_retry_o2:
-        ctx_o2 = _prepare_prediction_context(query_event, cluster_result, True)
-        return _infer_once(ctx_o2)
-
-    return result
+    return predict_from_context(ctx)
 
 
 def predict_batch(
