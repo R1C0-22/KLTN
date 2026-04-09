@@ -32,13 +32,11 @@ from datetime import datetime
 from pathlib import Path
 from typing import Any, Sequence
 
-from common import event_fields, parse_timestamp
+from common import event_fields, parse_timestamp, env_truthy
 from llm.response_cache import cache_get, cache_set
 
 
-def _extract_event_fields(event: Any) -> tuple[str, str, str, str]:
-    # Delegate to the shared helper for standard Quadruple / tuple events.
-    return event_fields(event)
+_extract_event_fields = event_fields
 
 
 def _softmax(logits: Sequence[float]) -> list[float]:
@@ -470,22 +468,8 @@ def extract_dual_history(
     """
     from short_term import get_short_term
 
-    # Evaluation toggles for ablation scripts:
-    # - DISABLE_SHORT_TERM=1: force HS = []
-    # - DISABLE_LONG_TERM=1: force HL = []
-    # They are optional and keep default paper behavior when unset.
-    disable_short = os.environ.get("DISABLE_SHORT_TERM", "").strip().lower() in {
-        "1",
-        "true",
-        "yes",
-        "on",
-    }
-    disable_long = os.environ.get("DISABLE_LONG_TERM", "").strip().lower() in {
-        "1",
-        "true",
-        "yes",
-        "on",
-    }
+    disable_short = env_truthy("DISABLE_SHORT_TERM")
+    disable_long = env_truthy("DISABLE_LONG_TERM")
 
     # Step 1: Get short-term history (last l events)
     short_term = [] if disable_short else get_short_term(full_history, l=l)
@@ -553,7 +537,7 @@ def extract_dual_history(
     except ValueError:
         max_dtf_timesteps = 0
 
-    _verbose = os.environ.get("LLM_VERBOSE", "").strip().lower() in ("1", "true", "yes")
+    _verbose = env_truthy("LLM_VERBOSE")
 
     for ts_idx, (date_key, events) in enumerate(timestep_groups):
         if len(long_term_selected) >= target_long_term_len:

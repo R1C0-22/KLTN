@@ -1,18 +1,15 @@
-from __future__ import annotations
-
 """
 Common utilities for Temporal Knowledge Graph events.
 
-The project uses the same (subject, relation, object, timestamp) pattern
-across multiple modules. This file centralizes:
-
-  - Extraction of (s, r, o, t) from different event representations.
-  - Parsing of timestamp strings into `datetime` objects.
-
-Keeping these helpers in one place avoids subtle inconsistencies and
-duplicate timestamp format lists scattered around the codebase.
+Centralizes:
+  - Extraction of (s, r, o, t) from different event representations
+  - Parsing of timestamp strings into ``datetime`` objects
+  - Shared helpers (``env_truthy``, ``log``) used across modules
 """
 
+from __future__ import annotations
+
+import os
 from datetime import datetime, timedelta
 from typing import Any
 
@@ -59,27 +56,30 @@ def event_fields(event: Any) -> tuple[str, str, str, str]:
 def parse_timestamp(ts: str) -> datetime | None:
     """Parse common ICEWS/GDELT timestamp formats for sorting.
 
-    Returns `datetime` or None if parsing fails.
+    Integer snapshot IDs (e.g. ``"3243"``) are mapped to day offsets from
+    1970-01-01 so each snapshot stays in its own timestep for DTF grouping.
     """
     ts = str(ts).strip()
-    # ICEWS/GDELT preprocessing in this repo often stores timestamp as
-    # integer snapshot ids (e.g. "0", "12", "3243"), where each unit is
-    # a discrete timestep. Mapping them as *seconds* collapses many events
-    # into the same day (1970-01-01), which breaks day/timestep grouping in
-    # DTF. Use day offsets so each snapshot stays in its own timestep.
     if ts.isdigit():
-        day_offset = int(ts)
-        return datetime(1970, 1, 1) + timedelta(days=day_offset)
-    for fmt in (
-        "%Y-%m-%d",
-        "%Y/%m/%d",
-        "%Y-%m-%dT%H:%M:%S",
-        "%d/%m/%Y",
-    ):
+        return datetime(1970, 1, 1) + timedelta(days=int(ts))
+    for fmt in ("%Y-%m-%d", "%Y/%m/%d", "%Y-%m-%dT%H:%M:%S", "%d/%m/%Y"):
         try:
             return datetime.strptime(ts, fmt)
         except ValueError:
             continue
     return None
+
+
+def env_truthy(name: str, default: bool = False) -> bool:
+    """Check if an environment variable is truthy (``1``, ``true``, ``yes``, ``on``)."""
+    v = os.environ.get(name, "").strip().lower()
+    if not v:
+        return default
+    return v in ("1", "true", "yes", "on")
+
+
+def log(msg: str) -> None:
+    """Print with flush for real-time output in Colab."""
+    print(msg, flush=True)
 
 

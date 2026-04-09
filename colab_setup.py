@@ -54,6 +54,8 @@ import sys
 import time
 from pathlib import Path
 
+from common import env_truthy as _env_truthy, log as _log
+
 REPO_ROOT = "/content/KLTN"
 DEFAULT_DATA_DIR = "data/ICEWS05-15"
 DEFAULT_REPO_URL = "https://github.com/R1C0-22/KLTN.git"
@@ -149,11 +151,6 @@ def _resolve_load_4bit(requested_4bit: bool) -> bool:
         "To fix 4-bit: pip install a matching bitsandbytes, then Runtime → Restart session."
     )
     return False
-
-
-def _log(msg: str) -> None:
-    """Print with flush for real-time output in Colab."""
-    print(msg, flush=True)
 
 
 def clear_gpu_memory() -> None:

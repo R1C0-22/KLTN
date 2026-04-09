@@ -40,23 +40,22 @@ from datetime import datetime
 from pathlib import Path
 from typing import Any, Callable, Sequence
 
-from common import event_fields, parse_timestamp
+from common import event_fields, parse_timestamp, env_truthy as _env_truthy
+
+_CALLABLE_DEFAULTS: dict[str, str] = {
+    "LLM_PREDICTOR": "llm.cloud_adapter:predict_fn",
+    "LLM_GENERATOR": "llm.cloud_adapter:generate_fn",
+    "LLM_PREDICTOR_LOGPROBS": "llm.cloud_adapter:predict_with_logprobs_fn",
+}
 
 
 def _load_callable_from_env(var_name: str) -> Callable[[str], str]:
     """Load a callable from environment variable specification."""
     spec = os.environ.get(var_name, "").strip()
     if not spec:
-        if var_name == "LLM_PREDICTOR":
-            spec = "llm.cloud_adapter:predict_fn"
-        elif var_name == "LLM_GENERATOR":
-            spec = "llm.cloud_adapter:generate_fn"
-        elif var_name == "LLM_PREDICTOR_LOGPROBS":
-            spec = "llm.cloud_adapter:predict_with_logprobs_fn"
-        else:
-            raise EnvironmentError(
-                f"{var_name} is not set and no default is configured."
-            )
+        spec = _CALLABLE_DEFAULTS.get(var_name, "")
+    if not spec:
+        raise EnvironmentError(f"{var_name} is not set and no default is configured.")
     if ":" not in spec:
         raise ValueError(f"{var_name} must be in format 'module_path:function_name'.")
     module_name, fn_name = spec.split(":", 1)
@@ -65,14 +64,6 @@ def _load_callable_from_env(var_name: str) -> Callable[[str], str]:
     if not callable(fn):
         raise TypeError(f"{var_name} resolved to non-callable: {spec}")
     return fn
-
-
-def _env_truthy(name: str, default: bool = False) -> bool:
-    """Check if environment variable is truthy."""
-    v = os.environ.get(name, "").strip().lower()
-    if not v:
-        return default
-    return v in ("1", "true", "yes", "on")
 
 
 def _llm_provider() -> str:
@@ -624,47 +615,18 @@ def predict_batch(
     return predictions
 
 
-def _apply_dummy_llm_env_if_no_api_keys() -> None:
-    """Use dummy LLM callables when no API key is set."""
-    has_openai = bool(os.environ.get("OPENAI_API_KEY", "").strip())
-    has_groq = bool(os.environ.get("GROQ_API_KEY", "").strip())
-    provider = (os.environ.get("LLM_PROVIDER") or "").strip().lower()
-    uses_local_hf = provider in ("hf", "huggingface", "local", "transformers")
-    
-    if has_openai or has_groq or uses_local_hf:
-        return
-    
-    if not os.environ.get("LLM_GENERATOR", "").strip():
-        os.environ["LLM_GENERATOR"] = "analogical.dummy_generator:generate_fn"
-    if not os.environ.get("LLM_SCORER", "").strip():
-        os.environ["LLM_SCORER"] = "long_term.dummy_scorer:score_fn"
-    if not os.environ.get("LLM_PREDICTOR", "").strip():
-        os.environ["LLM_PREDICTOR"] = "inference.dummy_predictor:predict_fn"
-
-
 if __name__ == "__main__":
-    import sys
-    
     code_root = Path(__file__).resolve().parents[1]
-    if not os.environ.get("TKG_DATA_DIR"):
-        os.environ["TKG_DATA_DIR"] = str(code_root / "data" / "ICEWS05-15")
-    
+    os.environ.setdefault("TKG_DATA_DIR", str(code_root / "data" / "ICEWS05-15"))
     os.environ.setdefault("MIN_HISTORY_CONTEXTS", "0")
-    
-    _apply_dummy_llm_env_if_no_api_keys()
-    
+
     from preprocessing import load_dataset
-    
+
     data_dir = os.environ["TKG_DATA_DIR"]
     valid_quads = load_dataset(data_dir, splits=["valid"])
-    test_quads = load_dataset(data_dir, splits=["test"])
-    train_quads = load_dataset(data_dir, splits=["train"])
-    
-    query_quad = valid_quads[0] if valid_quads else (test_quads[0] if test_quads else train_quads[0])
+    query_quad = valid_quads[0]
     q = (query_quad.subject, query_quad.relation, "?", query_quad.timestamp)
-    
+
     print(f"Query: {q}")
     print(f"Ground truth: {query_quad.object}")
-    
-    prediction = predict_next_object(q)
-    print(f"Prediction: {prediction}")
+    print(f"Prediction: {predict_next_object(q)}")

@@ -53,6 +53,8 @@ import urllib.error
 import urllib.request
 from typing import Any
 
+from common import env_truthy, log as _log
+
 
 def _hf_drop_fixed_max_length(model: Any) -> None:
     """HF checkpoints often set generation_config.max_length (e.g. 4096). Passing
@@ -202,15 +204,7 @@ def _call_groq(prompt: str) -> str:
 # ---------------------------------------------------------------------------
 
 def _env_truthy(name: str, default: bool = False) -> bool:
-    v = os.environ.get(name, "").strip().lower()
-    if not v:
-        return default
-    return v in ("1", "true", "yes", "on")
-
-
-def _log(msg: str) -> None:
-    """Print with flush for real-time output in Colab."""
-    print(msg, flush=True)
+    return env_truthy(name, default)
 
 
 def _load_huggingface_model(model_id: str) -> None:

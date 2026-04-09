@@ -1,8 +1,15 @@
 data/
 __pycache__/
-CHAT_SUMMARY.md
-COLAB_SETUP.md
-REQUESTS.MD
-IMPROVE.MD
-output.txt
 *.pyc
+*.pyo
+
+# Colab / runtime artifacts
+.llm_cache/
+llm_cache/
+*.log
+
+# IDE / OS
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db

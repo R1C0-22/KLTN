@@ -47,6 +47,8 @@ import os
 import re
 from typing import Any, Sequence, List
 
+from common import env_truthy
+
 from .response_cache import cache_get, cache_set
 from .unified import call_llm, call_llm_logprobs
 
@@ -149,7 +151,7 @@ def score_fn(prompt: str, events: Sequence[Any]) -> List[float]:
     else:
         n_ev = len(events)
         score_limit = str(_effective_score_max_new_tokens(n_ev))
-        if os.environ.get("LLM_VERBOSE", "").strip().lower() in ("1", "true", "yes"):
+        if env_truthy("LLM_VERBOSE"):
             print(
                 f"[llm] score_fn: n_events={n_ev} HF_MAX_NEW_TOKENS={score_limit} "
                 f"prompt_chars={len(prompt)}",
@@ -169,9 +171,7 @@ def score_fn(prompt: str, events: Sequence[Any]) -> List[float]:
 
     if not isinstance(raw, str):
         raw = str(raw)
-    use_fallback = os.environ.get("LLM_SCORE_PARSE_FALLBACK", "").strip().lower() in (
-        "1", "true", "yes", "on"
-    )
+    use_fallback = env_truthy("LLM_SCORE_PARSE_FALLBACK")
 
     try:
         scores = _extract_first_json_array(raw.strip())
@@ -222,9 +222,7 @@ def predict_fn(prompt: str) -> str:
     Optional: ``HF_PREDICT_MAX_NEW_TOKENS`` overrides ``HF_MAX_NEW_TOKENS`` for this call only
     (short rationale + index; default in ``setup()`` is enough for most cases).
     """
-    use_cache = os.environ.get("LLM_CACHE_PREDICT", "1").strip().lower() in (
-        "1", "true", "yes", "on",
-    )
+    use_cache = env_truthy("LLM_CACHE_PREDICT", default=True)
     if use_cache:
         cached = cache_get("predict", prompt)
         if cached is not None:
@@ -278,12 +276,7 @@ def predict_with_logprobs_fn(
     """
     import math
 
-    use_logprob_cache = os.environ.get("LLM_CACHE_LOGPROBS", "1").strip().lower() in (
-        "1",
-        "true",
-        "yes",
-        "on",
-    )
+    use_logprob_cache = env_truthy("LLM_CACHE_LOGPROBS", default=True)
     cache_payload = prompt + "\n" + json.dumps(candidates, ensure_ascii=False)
     if use_logprob_cache:
         cached = cache_get("logprobs", cache_payload)
