@@ -537,7 +537,7 @@ def test_prediction_metrics(
         os.environ["MAX_DTF_TIMESTEP_ITERATIONS"] = "10" if is_t4 else "40"
 
     if gpu_name:
-        use_logprob = _env_truthy("USE_LOGPROB_PREDICTION", default=False)
+        use_logprob = _env_truthy("USE_LOGPROB_PREDICTION", default=True)
         _log(
             f"[test_prediction_metrics] GPU={gpu_name} "
             f"(chunk={os.environ.get('LLM_SCORE_CHUNK_SIZE')}, "

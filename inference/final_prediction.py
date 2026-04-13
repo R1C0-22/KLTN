@@ -74,15 +74,15 @@ def _llm_provider() -> str:
 def _should_use_logprob_prediction() -> bool:
     """Decide whether to use logprob-based prediction.
 
-    - If `USE_LOGPROB_PREDICTION` is explicitly set, honor it.
-    - Otherwise default to:
-      - True for cloud APIs (OpenAI/Groq), matching paper §3.3
-      - False for local HF on Colab to avoid very slow per-candidate forwards
+    Paper §3.3 requires logprob-based scoring for probability ranking.
+    Defaults to True for all providers. The HF KV-cache-optimized scorer
+    makes this practical even on T4.
+    Set ``USE_LOGPROB_PREDICTION=0`` to force generate+parse fallback.
     """
     raw = os.environ.get("USE_LOGPROB_PREDICTION", "").strip()
     if raw:
         return raw.lower() in ("1", "true", "yes", "on")
-    return _llm_provider() in ("openai", "groq")
+    return True
 
 
 def _max_logprob_candidates_default() -> int:
