@@ -57,11 +57,12 @@ def parse_timestamp(ts: str) -> datetime | None:
     """Parse common ICEWS/GDELT timestamp formats for sorting.
 
     Integer snapshot IDs (e.g. ``"3243"``) are mapped to day offsets from
-    1970-01-01 so each snapshot stays in its own timestep for DTF grouping.
+    2005-01-01 (ICEWS05-15 start date), consistent with
+    ``preprocessing.verbalize._format_date``.
     """
     ts = str(ts).strip()
     if ts.isdigit():
-        return datetime(1970, 1, 1) + timedelta(days=int(ts))
+        return datetime(2005, 1, 1) + timedelta(days=int(ts))
     for fmt in ("%Y-%m-%d", "%Y/%m/%d", "%Y-%m-%dT%H:%M:%S", "%d/%m/%Y"):
         try:
             return datetime.strptime(ts, fmt)
