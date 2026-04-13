@@ -319,11 +319,12 @@ def setup(
     # if top-1 probability < threshold, retry with O²q. Set >0 to enable.
     os.environ.setdefault("ADAPTIVE_CONFIDENCE_THRESHOLD", "0")
     os.environ.setdefault("DTF_ALPHA", "2.75")
-    # Logprob prediction (paper §3.3) requires one forward pass per candidate label.
-    # With |Oq| ~ 200 and 4-bit 8B models on T4 this takes ~10+ minutes per query
-    # and logprobs are poorly calibrated through quantization.
-    # Default off for HF; use generation + index-parsing instead.
-    os.environ.setdefault("USE_LOGPROB_PREDICTION", "0")
+    # Logprob prediction (paper §3.3): map candidates to indices, score via
+    # logprob, softmax → probability distribution for Hit@k.
+    # KV-cache-optimised scorer (_logprobs_huggingface_kv_cached) makes this
+    # practical on T4: 1 prompt forward + tiny per-label continuations.
+    # Without logprobs, Hit@10 ≡ Hit@1 (binary probabilities).
+    os.environ.setdefault("USE_LOGPROB_PREDICTION", "1")
     # Dual history (§3.2): one LLM PDC call per calendar day processed until L is filled.
     # Dense subjects can require 100+ days → 30+ minutes per query on T4. Cap timesteps for
     # Colab notebooks; set to "0" for full paper-faithful DTF (slow overnight runs).

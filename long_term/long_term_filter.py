@@ -135,10 +135,6 @@ def _embedding_similarity_scores(
     return [float(x) for x in sims]
 
 
-_PDC_SCORE_FLOOR = -1.5
-_PDC_SCORE_CEIL = 2.0
-
-
 def _compute_scores_one_chunk(
     history_chunk: Sequence[Any],
     query_event: Any,
@@ -151,10 +147,10 @@ def _compute_scores_one_chunk(
     Events are verbalized into natural language (paper Figure 8 / Table 7)
     so the LLM can assess semantic relevance to the query.
 
-    When the LLM returns degenerate scores (all identical) or scores outside
-    the expected [0, 1] range (common with 4-bit quantized models producing
-    raw logits instead of helpfulness scores), falls back to embedding cosine
-    similarity using the SentenceTransformer already loaded for clustering.
+    Scores can be arbitrary real values (raw logits); the paper normalizes
+    them with softmax per-timestep in ``filter_long_term``.  Only truly
+    degenerate scores (all identical) are replaced with embedding cosine
+    similarity, since softmax would give uniform probabilities.
     """
     from preprocessing import verbalize_event
 
@@ -183,13 +179,10 @@ def _compute_scores_one_chunk(
 
     if len(logits) > 1:
         mn, mx = min(logits), max(logits)
-        degenerate = (mx - mn) < 1e-9
-        out_of_range = mn < _PDC_SCORE_FLOOR or mx > _PDC_SCORE_CEIL
-        if degenerate or out_of_range:
+        if (mx - mn) < 1e-9:
             if env_truthy("LLM_VERBOSE"):
-                reason = "degenerate" if degenerate else f"out of range [{mn:.1f}, {mx:.1f}]"
                 print(
-                    f"[llm] PDC scores {reason} for {len(logits)} events "
+                    f"[llm] PDC scores degenerate for {len(logits)} events "
                     f"→ embedding similarity fallback",
                     flush=True,
                 )
