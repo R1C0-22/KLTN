@@ -488,7 +488,7 @@ def _infer_from_context(ctx: _PredictionContext) -> PredictionResult:
         except Exception:
             pass
 
-    predictor = _load_callable_from_env("LLM_GENERATOR")
+    predictor = _load_callable_from_env("LLM_PREDICTOR")
     llm_output = predictor(ctx.final_prompt)
     predicted = _extract_predicted_object(str(llm_output), ctx.candidate_set)
     probabilities = [1.0 if c == predicted else 0.0 for c in ctx.candidate_set]

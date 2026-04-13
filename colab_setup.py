@@ -153,6 +153,32 @@ def _resolve_load_4bit(requested_4bit: bool) -> bool:
     return False
 
 
+def clear_llm_cache(cache_dir: str | None = None) -> int:
+    """Remove all cached LLM responses so the next run recomputes them.
+
+    Returns the number of cache files deleted.  Use after switching models,
+    changing prompts, or when predictions look stale (``completed in 0.0s``
+    with wrong answers).
+    """
+    import shutil
+
+    if cache_dir is None:
+        cache_dir = os.environ.get("LLM_CACHE_DIR", "").strip()
+    if not cache_dir:
+        _log("[clear_llm_cache] LLM_CACHE_DIR is not set — nothing to clear")
+        return 0
+    p = Path(cache_dir)
+    if not p.is_dir():
+        _log(f"[clear_llm_cache] {cache_dir} does not exist — nothing to clear")
+        return 0
+    files = list(p.glob("*.txt"))
+    n = len(files)
+    shutil.rmtree(p)
+    p.mkdir(parents=True, exist_ok=True)
+    _log(f"[clear_llm_cache] deleted {n} cached entries from {cache_dir}")
+    return n
+
+
 def clear_gpu_memory() -> None:
     """Clear GPU memory cache to prevent OOM errors.
 
