@@ -622,7 +622,11 @@ def _logprobs_huggingface_kv_cached(
                     kv = step_out.past_key_values
                     del step_out, step_lp
 
-        scores.append(total)
+        # Paper §3.3 assumes single-token labels ("numerical token").
+        # With BPE, multi-digit labels (e.g. "10", "199") have more tokens
+        # and their summed logprob is systematically lower.  Normalizing by
+        # token count removes this length bias.
+        scores.append(total / len(cont_ids))
 
     del base_kv, next_log_probs
     return scores

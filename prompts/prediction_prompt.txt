@@ -13,6 +13,5 @@ Question:
 Candidate Answers:
 {candidates}
 
+Output exactly one integer index (1 to N) of the most likely correct answer. Do not output the entity name.
 Your choice is:
-
-IMPORTANT: After any brief reasoning, output exactly one final line containing only the integer index (1 to N, where N is the number of candidates above). Do not put the entity name on that line.
