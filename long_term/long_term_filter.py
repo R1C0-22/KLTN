@@ -108,11 +108,17 @@ def _compute_scores_one_chunk(
     prompt_template: str,
     score_fn: Any,
 ) -> list[float]:
-    """One LLM scoring call for *history_chunk* only (local indices 1..len(chunk))."""
+    """One LLM scoring call for *history_chunk* only (local indices 1..len(chunk)).
+
+    Events are verbalized into natural language (paper Figure 8 / Table 7)
+    so the LLM can assess semantic relevance to the query.
+    """
+    from preprocessing import verbalize_event
+
     labeled_events = []
     for i, ev in enumerate(history_chunk, start=1):
         s, r, o, t = _extract_event_fields(ev)
-        labeled_events.append(f"{i}. ({s}, {r}, {o}, {t})")
+        labeled_events.append(f"{i}. {verbalize_event(s, r, o, t)}")
 
     labeled_history = "\n".join(labeled_events)
     query_text = _make_question_from_query_event(query_event)

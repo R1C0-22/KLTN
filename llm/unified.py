@@ -345,8 +345,6 @@ def _call_huggingface(prompt: str) -> str:
         use_cache=True,
         pad_token_id=tokenizer.pad_token_id,
         eos_token_id=getattr(tokenizer, "eos_token_id", None),
-        temperature=1.0,
-        top_p=1.0,
     )
 
     out = None
