@@ -321,10 +321,11 @@ def setup(
     os.environ.setdefault("DTF_ALPHA", "2.75")
     # Logprob prediction (paper §3.3): map candidates to indices, score via
     # logprob, softmax → probability distribution for Hit@k.
-    # KV-cache-optimised scorer (_logprobs_huggingface_kv_cached) makes this
-    # practical on T4: 1 prompt forward + tiny per-label continuations.
+    #
+    # On local HF (Colab/T4), generation+index parsing is often more stable.
+    # Keep logprob available via USE_LOGPROB_PREDICTION=1 for ablations.
     # Without logprobs, Hit@10 ≡ Hit@1 (binary probabilities).
-    os.environ.setdefault("USE_LOGPROB_PREDICTION", "1")
+    os.environ.setdefault("USE_LOGPROB_PREDICTION", "0")
     # Dual history (§3.2): one LLM PDC call per calendar day processed until L is filled.
     # Dense subjects can require 100+ days → 30+ minutes per query on T4. Cap timesteps for
     # Colab notebooks; set to "0" for full paper-faithful DTF (slow overnight runs).
@@ -567,7 +568,7 @@ def test_prediction_metrics(
         os.environ["MAX_DTF_TIMESTEP_ITERATIONS"] = "10" if is_t4 else "40"
 
     if gpu_name:
-        use_logprob = _env_truthy("USE_LOGPROB_PREDICTION", default=True)
+        use_logprob = _env_truthy("USE_LOGPROB_PREDICTION", default=False)
         _log(
             f"[test_prediction_metrics] GPU={gpu_name} "
             f"(chunk={os.environ.get('LLM_SCORE_CHUNK_SIZE')}, "
@@ -665,6 +666,17 @@ def test_prediction_metrics(
             f"[test_prediction_metrics] i={idx} predicted={pred!r} "
             f"Hit@1={ok1} Hit@10={ok10}"
         )
+        if not ok10:
+            ranked = res.get_ranked_candidates()
+            gt_rank = next(
+                (rank for rank, (cand, _p) in enumerate(ranked, start=1) if cand.strip() == gt),
+                None,
+            )
+            top5 = ", ".join(c for c, _ in ranked[:5])
+            _log(
+                f"[test_prediction_metrics] i={idx} MISS gt_rank={gt_rank} "
+                f"top5=[{top5}]"
+            )
 
     hit1_rate = (hits1 / evaluated) if evaluated else 0.0
     hit10_rate = (hits10 / evaluated) if evaluated else 0.0
