@@ -299,6 +299,11 @@ def setup(
     # Dense subjects can require 100+ days → 30+ minutes per query on T4. Cap timesteps for
     # Colab notebooks; set to "0" for full paper-faithful DTF (slow overnight runs).
     os.environ.setdefault("MAX_DTF_TIMESTEP_ITERATIONS", "40")
+    # Paper Algorithm 1 line 16: skip similar candidates with |Hai| < threshold.
+    # Paper uses L (=100), but when DTF is capped the long-term pool can't fill L,
+    # causing ALL analogical candidates to be rejected (no analogical reasoning!).
+    # Auto-computed in final_prediction.py when unset; override here for explicit control.
+    # os.environ.setdefault("MIN_SIMILAR_HISTORY_LENGTH", "40")
 
     clear_gpu_memory()
     
@@ -310,10 +315,17 @@ def setup(
         f"[setup] history: short_term={short_term_l}, target_L={history_length} "
         f"(paper §6.1); adaptive_O2={adaptive_candidates}"
     )
+    dtf_cap = os.environ.get("MAX_DTF_TIMESTEP_ITERATIONS", "0")
+    min_sim = os.environ.get("MIN_SIMILAR_HISTORY_LENGTH", "")
+    if not min_sim:
+        dtf_int = int(dtf_cap) if dtf_cap.strip().isdigit() else 0
+        min_sim = str(history_length) if dtf_int <= 0 else str(max(short_term_l, short_term_l + dtf_int // 2))
+        min_sim += " (auto)"
     _log(
-        f"[setup] MAX_DTF_TIMESTEP_ITERATIONS={os.environ.get('MAX_DTF_TIMESTEP_ITERATIONS', '0')} "
+        f"[setup] MAX_DTF_TIMESTEP_ITERATIONS={dtf_cap} "
         f"(PDC calls per query ≈ min(days, cap); set 0 for no cap)"
     )
+    _log(f"[setup] MIN_SIMILAR_HISTORY_LENGTH={min_sim} (min |Hai| for analogical candidates)")
     _log(
         f"[setup] cache_dir={os.environ.get('LLM_CACHE_DIR', '(disabled)')} "
         "(set empty to disable cache)"

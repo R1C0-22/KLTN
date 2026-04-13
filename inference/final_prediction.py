@@ -333,18 +333,36 @@ def _prepare_prediction_context(
     else:
         candidate_set = build_candidate_set(entity_history_q, sq)
     
+    # Paper Algorithm 1, line 16: skip if |Hai| < L.
+    # When DTF is capped (MAX_DTF_TIMESTEP_ITERATIONS > 0), the cap limits
+    # how many long-term events can be collected, making L unreachable.
+    # Auto-lower the threshold so analogical candidates aren't all rejected.
+    min_hist_raw = os.environ.get("MIN_SIMILAR_HISTORY_LENGTH", "").strip()
+    if min_hist_raw:
+        min_hist = int(min_hist_raw)
+    else:
+        max_dtf = int(os.environ.get("MAX_DTF_TIMESTEP_ITERATIONS", "0"))
+        min_hist = L if max_dtf <= 0 else max(l, l + max_dtf // 2)
+
     similar_candidates = find_similar_events_from_cluster(
         query_event=masked_query,
         cluster_entities=cluster_X,
         all_data=data,
         top_a=a,
         min_contexts=int(os.environ.get("MIN_HISTORY_CONTEXTS", "300")),
-        min_history_length=L,
+        min_history_length=min_hist,
         short_term_l=l,
         dual_history_target_L=L,
         dtf_alpha=dtf_alpha,
     )
     
+    if _env_truthy("LLM_VERBOSE"):
+        from common import log as _log
+        _log(
+            f"[analogical] found {len(similar_candidates)} candidates "
+            f"(min_hist={min_hist}, cluster_size={len(cluster_X)})"
+        )
+
     if similar_candidates:
         analogical_examples = construct_analogical_examples_batch(similar_candidates)
         analogical_text = format_analogical_examples_for_prompt(analogical_examples)
