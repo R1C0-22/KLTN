@@ -30,7 +30,9 @@ from datetime import datetime
 from pathlib import Path
 from typing import Any, Sequence
 
-from common import event_fields, parse_timestamp, env_truthy
+import numpy as np
+
+from common import event_fields, parse_timestamp, env_truthy, DEFAULT_EMBED_MODEL
 
 
 _extract_event_fields = event_fields
@@ -101,6 +103,38 @@ def _make_question_from_query_event(query_event: Any) -> str:
     return verbalize_masked_query(s, r, t)
 
 
+def _embedding_similarity_scores(
+    history_chunk: Sequence[Any],
+    query_event: Any,
+) -> list[float]:
+    """Cosine similarity between query and each event using the shared SentenceTransformer.
+
+    Fallback for quantized local LLMs (e.g. Llama 3 8B 4-bit) that produce
+    degenerate all-zero PDC scores.  The embedding model is already loaded
+    for clustering (§3.1), so this adds negligible overhead.
+    """
+    from clustering.shared_st import get_shared_sentence_transformer
+    from preprocessing import verbalize_event
+
+    model = get_shared_sentence_transformer(DEFAULT_EMBED_MODEL, device=None)
+
+    qs, qr, _qo, qt = _extract_event_fields(query_event)
+    query_text = verbalize_event(qs, qr, "?", qt).strip()
+
+    event_texts = []
+    for ev in history_chunk:
+        s, r, o, t = _extract_event_fields(ev)
+        event_texts.append(verbalize_event(s, r, o, t).strip())
+
+    embs = model.encode(
+        [query_text] + event_texts,
+        convert_to_numpy=True,
+        normalize_embeddings=True,
+    )
+    sims = np.dot(embs[1:], embs[0])
+    return [float(x) for x in sims]
+
+
 def _compute_scores_one_chunk(
     history_chunk: Sequence[Any],
     query_event: Any,
@@ -112,6 +146,9 @@ def _compute_scores_one_chunk(
 
     Events are verbalized into natural language (paper Figure 8 / Table 7)
     so the LLM can assess semantic relevance to the query.
+
+    When the LLM returns degenerate scores (all identical, common with 4-bit
+    quantized models), falls back to embedding cosine similarity.
     """
     from preprocessing import verbalize_event
 
@@ -137,6 +174,11 @@ def _compute_scores_one_chunk(
         )
     if len(logits) > expected:
         logits = list(logits)[:expected]
+
+    if len(logits) > 1:
+        mn, mx = min(logits), max(logits)
+        if (mx - mn) < 1e-9:
+            logits = _embedding_similarity_scores(history_chunk, query_event)
 
     return [float(x) for x in logits]
 

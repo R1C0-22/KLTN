@@ -138,16 +138,6 @@ def _fallback_scores(prompt: str, events: Sequence[Any]) -> List[float]:
     return scores
 
 
-def _scores_are_degenerate(scores: List[float]) -> bool:
-    """True when scores carry no useful signal (all identical or zero variance)."""
-    if not scores:
-        return True
-    if len(scores) == 1:
-        return False
-    mn, mx = min(scores), max(scores)
-    return (mx - mn) < 1e-9
-
-
 def score_fn(prompt: str, events: Sequence[Any]) -> List[float]:
     """
     Long-term history scoring used by `compute_scores_with_llm`.
@@ -155,9 +145,10 @@ def score_fn(prompt: str, events: Sequence[Any]) -> List[float]:
     The prompt (from `prompts/filter_prompt.txt`) must instruct the model
     to output ONLY a JSON array of real-valued logits, one per event.
 
-    When the model returns degenerate scores (all zeros / identical values
-    for multi-event chunks), hash-based fallback scores are substituted so
-    that DTF filtering still differentiates events (see IMPROVE.MD).
+    When the LLM returns degenerate (all-identical) scores — common with
+    4-bit quantized models — the caller (`_compute_scores_one_chunk`) falls
+    back to embedding cosine similarity.  Hash-based fallback is still used
+    for JSON parse failures and truncated arrays.
     """
     cached_raw = cache_get("score", prompt)
     if cached_raw is not None:
@@ -205,15 +196,6 @@ def score_fn(prompt: str, events: Sequence[Any]) -> List[float]:
             )
     elif len(scores) > expected:
         scores = scores[:expected]
-
-    if _scores_are_degenerate(scores) and len(scores) > 1 and use_fallback:
-        if env_truthy("LLM_VERBOSE"):
-            print(
-                f"[llm] score_fn: degenerate scores {scores[:5]}… "
-                f"(all identical for {len(scores)} events) → using hash-based fallback",
-                flush=True,
-            )
-        return _fallback_scores(prompt, events)
 
     return scores
 
