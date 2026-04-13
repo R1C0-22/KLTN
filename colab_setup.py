@@ -300,6 +300,7 @@ def setup(
 
     # Single place to bind callables (Scout rule: explicit beats implicit).
     # Override in the notebook if you use a custom adapter.
+    os.environ.setdefault("LLM_SCORE_PARSE_FALLBACK", "1")
     os.environ.setdefault("LLM_SCORER", "llm.cloud_adapter:score_fn")
     os.environ.setdefault("LLM_GENERATOR", "llm.cloud_adapter:generate_fn")
     os.environ.setdefault("LLM_PREDICTOR", "llm.cloud_adapter:predict_fn")
