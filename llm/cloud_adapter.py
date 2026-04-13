@@ -147,6 +147,18 @@ def score_fn(prompt: str, events: Sequence[Any]) -> List[float]:
     """
     cached_raw = cache_get("score", prompt)
     if cached_raw is not None:
+        # Reject cached all-zero outputs — model failed to discriminate;
+        # re-calling may produce better scores (non-deterministic generation).
+        try:
+            _cached_arr = json.loads(cached_raw.strip())
+            if isinstance(_cached_arr, list) and len(_cached_arr) > 1 and all(
+                float(x) == 0.0 for x in _cached_arr
+            ):
+                cached_raw = None
+        except (json.JSONDecodeError, ValueError, TypeError):
+            pass
+
+    if cached_raw is not None:
         raw = cached_raw
     else:
         n_ev = len(events)
@@ -183,7 +195,6 @@ def score_fn(prompt: str, events: Sequence[Any]) -> List[float]:
     expected = len(events)
     if len(scores) < expected:
         if use_fallback:
-            # Pad missing scores with fallback values for remaining events
             missing = _fallback_scores(prompt, list(events)[len(scores):])
             scores.extend(missing)
         else:
@@ -192,6 +203,13 @@ def score_fn(prompt: str, events: Sequence[Any]) -> List[float]:
             )
     elif len(scores) > expected:
         scores = scores[:expected]
+
+    # All-zero scores mean the model failed to discriminate (common with
+    # 4-bit 8B models).  DTF softmax on uniform logits produces uniform
+    # probabilities → threshold keeps/rejects entire timesteps at random.
+    # Fall back to deterministic pseudo-scores that at least have variance.
+    if use_fallback and len(scores) > 1 and all(s == 0.0 for s in scores):
+        return _fallback_scores(prompt, events)
 
     return scores
 
