@@ -34,41 +34,21 @@ Optional disk cache (repeatable experiments, fewer HF forward passes):
     Per-step opt-out: LLM_CACHE_PREDICT=0 (final predict_fn only);
     LLM_CACHE_LOGPROBS=0 (predict_with_logprobs_fn only).
 
-Long-term PDC scoring (`score_fn`) extras (Hugging Face):
-    HF_SCORE_MAX_NEW_TOKENS=...     # optional floor; auto minimum scales with chunk size so JSON is not truncated
-    LLM_SCORE_PARSE_FALLBACK=1      # optional; if model output is not a JSON array, use deterministic pseudo-scores
+Long-term PDC scoring (`score_fn`) now uses logprobs (paper §3.2, Table 7):
+    The model selects the most helpful event by label number; we read
+    the logprob for each label to derive per-event scores for DTF.
 """
 
 from __future__ import annotations
 
-import hashlib
 import json
 import os
-import re
 from typing import Any, Sequence, List
 
 from common import env_truthy
 
 from .response_cache import cache_get, cache_set
 from .unified import call_llm, call_llm_logprobs
-
-
-def _min_score_max_new_tokens(n_events: int) -> int:
-    """Lower bound on new tokens so a JSON array of n floats can finish (closing `]`)."""
-    n = max(1, int(n_events))
-    # Keep this conservative but short: we only need a numeric JSON array.
-    # Large values (e.g. 500+) make local HF runs look "hung" on Colab.
-    return max(48, min(384, 4 * n + 24))
-
-
-def _effective_score_max_new_tokens(n_events: int) -> int:
-    """Merge explicit HF_SCORE_MAX_NEW_TOKENS with a minimum derived from chunk size."""
-    raw = os.environ.get("HF_SCORE_MAX_NEW_TOKENS", "").strip()
-    user = int(raw) if raw.isdigit() else 0
-    need = _min_score_max_new_tokens(n_events)
-    # If user sets HF_SCORE_MAX_NEW_TOKENS, treat it as an explicit override.
-    # This keeps notebook behavior predictable when tuning runtime vs quality.
-    return max(32, user) if user else need
 
 
 def generate_fn(prompt: str) -> str:
@@ -85,119 +65,38 @@ def generate_fn(prompt: str) -> str:
     return text
 
 
-def _extract_first_json_array(text: str) -> List[float]:
-    """
-    Extract the first JSON array from a model response and parse as floats.
-
-    Used by `score_fn`. The `filter_prompt.txt` template already instructs
-    the model to output ONLY a JSON array, but we stay defensive here.
-    """
-    text = text.strip()
-    # Strip optional markdown fence so JSON is parseable.
-    if text.startswith("```"):
-        lines = text.splitlines()
-        if lines and lines[0].startswith("```"):
-            lines = lines[1:]
-        if lines and lines[-1].strip().startswith("```"):
-            lines = lines[:-1]
-        text = "\n".join(lines).strip()
-
-    # Prefer balanced-bracket extraction: non-greedy `\\[[\\s\\S]*?\\]`
-    # can stop at the first `]` inside nested structures or mis-parse arrays.
-    start = text.find("[")
-    if start == -1:
-        raise ValueError(f"Could not find '[' in model output: {text[:200]!r}")
-    depth = 0
-    for i in range(start, len(text)):
-        if text[i] == "[":
-            depth += 1
-        elif text[i] == "]":
-            depth -= 1
-            if depth == 0:
-                arr_text = text[start : i + 1]
-                parsed = json.loads(arr_text)
-                if not isinstance(parsed, list):
-                    raise ValueError("Extracted JSON is not a list.")
-                return [float(x) for x in parsed]
-    # Truncated generation (max_new_tokens too low): try to salvage floats after "[".
-    tail = text[start + 1 :]
-    nums = re.findall(r"-?\d+(?:\.\d+)?(?:[eE][+-]?\d+)?", tail)
-    if nums:
-        return [float(x) for x in nums]
-    raise ValueError(f"Unclosed JSON array in model output: {text[:200]!r}")
-
-
-def _fallback_scores(prompt: str, events: Sequence[Any]) -> List[float]:
-    """Deterministic pseudo-logits when the model does not return parseable JSON."""
-    scores: List[float] = []
-    for ev in events:
-        s = repr(ev) + "|" + prompt[:200]
-        h = hashlib.sha256(s.encode("utf-8")).hexdigest()
-        v = int(h[:8], 16) / 0xFFFFFFFF
-        scores.append((v * 2.0) - 1.0)
-    return scores
-
-
 def score_fn(prompt: str, events: Sequence[Any]) -> List[float]:
-    """
-    Long-term history scoring used by `compute_scores_with_llm`.
+    """PDC scoring using logprobs (paper §3.2, Table 7, Eq. 1).
 
-    The prompt (from `prompts/filter_prompt.txt`) must instruct the model
-    to output ONLY a JSON array of real-valued logits, one per event.
+    The paper maps each historical event to a numerical label (1, 2, ...),
+    obtains the LLM's log-probability for each label token, and applies
+    softmax to derive the effectiveness probability distribution.
 
-    When the LLM returns degenerate (all-identical) scores — common with
-    4-bit quantized models — the caller (`_compute_scores_one_chunk`) falls
-    back to embedding cosine similarity.  Hash-based fallback is still used
-    for JSON parse failures and truncated arrays.
+    This uses the same mechanism as ``predict_with_logprobs_fn`` (§3.3)
+    and replaces the previous text-generation + JSON-parsing approach,
+    which caused degenerate all-zero scores on quantized models.
     """
-    cached_raw = cache_get("score", prompt)
+    n = len(events)
+    labels = [str(i) for i in range(1, n + 1)]
+
+    cached_raw = cache_get("score_lp", prompt)
     if cached_raw is not None:
-        raw = cached_raw
-    else:
-        n_ev = len(events)
-        score_limit = str(_effective_score_max_new_tokens(n_ev))
-        if env_truthy("LLM_VERBOSE"):
-            print(
-                f"[llm] score_fn: n_events={n_ev} HF_MAX_NEW_TOKENS={score_limit} "
-                f"prompt_chars={len(prompt)}",
-                flush=True,
-            )
-        saved_tok = os.environ.get("HF_MAX_NEW_TOKENS")
-        os.environ["HF_MAX_NEW_TOKENS"] = score_limit
         try:
-            raw = call_llm(prompt)
-        finally:
-            if saved_tok is None:
-                os.environ.pop("HF_MAX_NEW_TOKENS", None)
-            else:
-                os.environ["HF_MAX_NEW_TOKENS"] = saved_tok
-        raw = raw if isinstance(raw, str) else str(raw)
-        cache_set("score", prompt, raw)
+            cached = json.loads(cached_raw)
+            if isinstance(cached, list) and len(cached) == n:
+                return [float(x) for x in cached]
+        except (json.JSONDecodeError, ValueError, TypeError):
+            pass
 
-    if not isinstance(raw, str):
-        raw = str(raw)
-    use_fallback = env_truthy("LLM_SCORE_PARSE_FALLBACK")
+    if env_truthy("LLM_VERBOSE"):
+        print(
+            f"[llm] score_fn(logprob): n_events={n} prompt_chars={len(prompt)}",
+            flush=True,
+        )
 
-    try:
-        scores = _extract_first_json_array(raw.strip())
-    except ValueError:
-        if use_fallback:
-            return _fallback_scores(prompt, events)
-        raise
-
-    expected = len(events)
-    if len(scores) < expected:
-        if use_fallback:
-            missing = _fallback_scores(prompt, list(events)[len(scores):])
-            scores.extend(missing)
-        else:
-            raise ValueError(
-                f"Expected at least {expected} scores from model, got {len(scores)}."
-            )
-    elif len(scores) > expected:
-        scores = scores[:expected]
-
-    return scores
+    logprobs = call_llm_logprobs(prompt, labels)
+    cache_set("score_lp", prompt, json.dumps(logprobs))
+    return logprobs
 
 
 def _strip_outer_quotes(text: str) -> str:
@@ -331,12 +230,6 @@ def predict_with_logprobs_fn(
 
 
 if __name__ == "__main__":
-    # Very small smoke test (will fail if API keys / provider are not set).
     print("generate_fn:", generate_fn("Say 'hello' and nothing else."))
-    demo_scores = score_fn(
-        "[0.1, 0.2, 0.3]",
-        events=[1, 2, 3],
-    )
-    print("score_fn (dummy parse):", demo_scores)
     print("predict_fn:", predict_fn("Return only the word China."))
 

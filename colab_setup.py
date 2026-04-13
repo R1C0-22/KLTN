@@ -286,9 +286,7 @@ def setup(
     # only inside ``predict_fn`` (see llm/cloud_adapter.py).
     os.environ.setdefault("HF_PREDICT_MAX_NEW_TOKENS", str(max(128, min(512, max_tokens * 2))))
     os.environ["TKG_DATA_DIR"] = os.path.join(REPO_ROOT, data_dir)
-    os.environ["LLM_SCORE_PARSE_FALLBACK"] = "1"
-    os.environ.setdefault("HF_SCORE_MAX_NEW_TOKENS", "160")
-    # Larger chunks => fewer HF forward passes per timestep (faster; slightly longer prompts).
+    # Larger chunks => fewer logprob calls per timestep (faster; slightly longer prompts).
     os.environ.setdefault("LLM_SCORE_CHUNK_SIZE", "24")
     # Cap events per calendar day before PDC — ICEWS days can have 1000+ events.
     os.environ.setdefault("LLM_SCORE_MAX_EVENTS_PER_TIMESTEP", "64")

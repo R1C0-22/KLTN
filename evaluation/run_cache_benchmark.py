@@ -48,7 +48,6 @@ def main() -> None:
         {
             "LLM_CACHE_PREDICT": "0",
             "LLM_CACHE_LOGPROBS": "0",
-            "LLM_SCORE_PARSE_FALLBACK": os.environ.get("LLM_SCORE_PARSE_FALLBACK", "1"),
         }
     ):
         pred_off, t_off = _run_once(query)
