@@ -153,30 +153,29 @@ def _resolve_load_4bit(requested_4bit: bool) -> bool:
     return False
 
 
-def clear_llm_cache(cache_dir: str | None = None) -> int:
-    """Remove all cached LLM responses so the next run recomputes them.
+def clear_cache(cache_dir: str | None = None) -> int:
+    """Delete all cached LLM responses so the next run recomputes everything.
 
-    Returns the number of cache files deleted.  Use after switching models,
-    changing prompts, or when predictions look stale (``completed in 0.0s``
-    with wrong answers).
+    Call this after changing models, fixing prompts, or when cached scores
+    are stale (e.g. all-zero PDC scores from a previous bad run).
+
+    Returns the number of files deleted.
     """
     import shutil
 
-    if cache_dir is None:
-        cache_dir = os.environ.get("LLM_CACHE_DIR", "").strip()
-    if not cache_dir:
-        _log("[clear_llm_cache] LLM_CACHE_DIR is not set — nothing to clear")
+    d = cache_dir or os.environ.get("LLM_CACHE_DIR", "").strip()
+    if not d:
+        _log("[clear_cache] LLM_CACHE_DIR not set — nothing to clear")
         return 0
-    p = Path(cache_dir)
+    p = Path(d)
     if not p.is_dir():
-        _log(f"[clear_llm_cache] {cache_dir} does not exist — nothing to clear")
+        _log(f"[clear_cache] {p} does not exist — nothing to clear")
         return 0
-    files = list(p.glob("*.txt"))
-    n = len(files)
+    count = sum(1 for _ in p.iterdir() if _.is_file())
     shutil.rmtree(p)
     p.mkdir(parents=True, exist_ok=True)
-    _log(f"[clear_llm_cache] deleted {n} cached entries from {cache_dir}")
-    return n
+    _log(f"[clear_cache] deleted {count} cached files from {p}")
+    return count
 
 
 def clear_gpu_memory() -> None:
@@ -321,6 +320,11 @@ def setup(
     # if top-1 probability < threshold, retry with O²q. Set >0 to enable.
     os.environ.setdefault("ADAPTIVE_CONFIDENCE_THRESHOLD", "0")
     os.environ.setdefault("DTF_ALPHA", "2.75")
+    # Logprob prediction (paper §3.3) requires one forward pass per candidate label.
+    # With |Oq| ~ 200 and 4-bit 8B models on T4 this takes ~10+ minutes per query
+    # and logprobs are poorly calibrated through quantization.
+    # Default off for HF; use generation + index-parsing instead.
+    os.environ.setdefault("USE_LOGPROB_PREDICTION", "0")
     # Dual history (§3.2): one LLM PDC call per calendar day processed until L is filled.
     # Dense subjects can require 100+ days → 30+ minutes per query on T4. Cap timesteps for
     # Colab notebooks; set to "0" for full paper-faithful DTF (slow overnight runs).

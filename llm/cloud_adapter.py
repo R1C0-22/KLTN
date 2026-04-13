@@ -138,26 +138,28 @@ def _fallback_scores(prompt: str, events: Sequence[Any]) -> List[float]:
     return scores
 
 
+def _scores_are_degenerate(scores: List[float]) -> bool:
+    """True when scores carry no useful signal (all identical or zero variance)."""
+    if not scores:
+        return True
+    if len(scores) == 1:
+        return False
+    mn, mx = min(scores), max(scores)
+    return (mx - mn) < 1e-9
+
+
 def score_fn(prompt: str, events: Sequence[Any]) -> List[float]:
     """
     Long-term history scoring used by `compute_scores_with_llm`.
 
     The prompt (from `prompts/filter_prompt.txt`) must instruct the model
     to output ONLY a JSON array of real-valued logits, one per event.
+
+    When the model returns degenerate scores (all zeros / identical values
+    for multi-event chunks), hash-based fallback scores are substituted so
+    that DTF filtering still differentiates events (see IMPROVE.MD).
     """
     cached_raw = cache_get("score", prompt)
-    if cached_raw is not None:
-        # Reject cached all-zero outputs — model failed to discriminate;
-        # re-calling may produce better scores (non-deterministic generation).
-        try:
-            _cached_arr = json.loads(cached_raw.strip())
-            if isinstance(_cached_arr, list) and len(_cached_arr) > 1 and all(
-                float(x) == 0.0 for x in _cached_arr
-            ):
-                cached_raw = None
-        except (json.JSONDecodeError, ValueError, TypeError):
-            pass
-
     if cached_raw is not None:
         raw = cached_raw
     else:
@@ -204,11 +206,13 @@ def score_fn(prompt: str, events: Sequence[Any]) -> List[float]:
     elif len(scores) > expected:
         scores = scores[:expected]
 
-    # All-zero scores mean the model failed to discriminate (common with
-    # 4-bit 8B models).  DTF softmax on uniform logits produces uniform
-    # probabilities → threshold keeps/rejects entire timesteps at random.
-    # Fall back to deterministic pseudo-scores that at least have variance.
-    if use_fallback and len(scores) > 1 and all(s == 0.0 for s in scores):
+    if _scores_are_degenerate(scores) and len(scores) > 1 and use_fallback:
+        if env_truthy("LLM_VERBOSE"):
+            print(
+                f"[llm] score_fn: degenerate scores {scores[:5]}… "
+                f"(all identical for {len(scores)} events) → using hash-based fallback",
+                flush=True,
+            )
         return _fallback_scores(prompt, events)
 
     return scores
