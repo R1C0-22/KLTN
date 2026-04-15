@@ -318,7 +318,14 @@ def _call_huggingface(prompt: str) -> str:
     else:
         prompt_text = prompt
 
+    # Keep the tail of long prompts by default so the model still sees the
+    # final instruction/candidate block (critical for index prediction prompts).
+    trunc_side_raw = os.environ.get("HF_TRUNCATION_SIDE", "left").strip().lower()
+    trunc_side = "left" if trunc_side_raw not in ("left", "right") else trunc_side_raw
+    prev_trunc_side = getattr(tokenizer, "truncation_side", "right")
+    tokenizer.truncation_side = trunc_side
     enc = tokenizer(prompt_text, return_tensors="pt", truncation=True, max_length=input_cap)
+    tokenizer.truncation_side = prev_trunc_side
     device = next(model.parameters()).device
     input_ids = enc["input_ids"].to(device)
     attention_mask = enc.get("attention_mask")
@@ -669,7 +676,12 @@ def _logprobs_huggingface(prompt: str, candidate_labels: list[str]) -> list[floa
     else:
         prompt_text = prompt
 
+    trunc_side_raw = os.environ.get("HF_TRUNCATION_SIDE", "left").strip().lower()
+    trunc_side = "left" if trunc_side_raw not in ("left", "right") else trunc_side_raw
+    prev_trunc_side = getattr(tokenizer, "truncation_side", "right")
+    tokenizer.truncation_side = trunc_side
     enc = tokenizer(prompt_text, return_tensors="pt", truncation=True, max_length=input_cap)
+    tokenizer.truncation_side = prev_trunc_side
     device = next(model.parameters()).device
     base_input_ids = enc["input_ids"].to(device)
     base_attention_mask = enc.get("attention_mask")
