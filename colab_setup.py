@@ -375,6 +375,39 @@ def setup(
         _log(f"[setup] could not probe torch/CUDA: {exc}")
 
 
+def apply_fast_eval_config() -> None:
+    """Apply a fast debug-friendly config for Colab T4.
+
+    Goal: validate pipeline behavior quickly (not paper-faithful final numbers).
+    Use this before `test_prediction_metrics(...)` when you need rapid feedback.
+    """
+    # Keep HF local stable defaults for T4.
+    os.environ["USE_LOGPROB_PREDICTION"] = "0"
+
+    # Reduce DTF/PDC runtime pressure.
+    os.environ["MAX_DTF_TIMESTEP_ITERATIONS"] = os.environ.get(
+        "FAST_MAX_DTF_TIMESTEP_ITERATIONS", "10"
+    )
+    os.environ["LLM_SCORE_MAX_EVENTS_PER_TIMESTEP"] = os.environ.get(
+        "FAST_LLM_SCORE_MAX_EVENTS_PER_TIMESTEP", "32"
+    )
+    os.environ["LLM_SCORE_CHUNK_SIZE"] = os.environ.get("FAST_LLM_SCORE_CHUNK_SIZE", "12")
+
+    # Keep analogical replay but lighter.
+    os.environ["SHORT_TERM_L"] = os.environ.get("FAST_SHORT_TERM_L", "10")
+    os.environ["HISTORY_LENGTH_L"] = os.environ.get("FAST_HISTORY_LENGTH_L", "40")
+    os.environ["NUM_ANALOGICAL_EXAMPLES"] = os.environ.get("FAST_NUM_ANALOGICAL_EXAMPLES", "1")
+
+    _log(
+        "[fast-config] applied: "
+        f"L={os.environ['HISTORY_LENGTH_L']}, l={os.environ['SHORT_TERM_L']}, "
+        f"max_dtf_days={os.environ['MAX_DTF_TIMESTEP_ITERATIONS']}, "
+        f"chunk={os.environ['LLM_SCORE_CHUNK_SIZE']}, "
+        f"cap_per_day={os.environ['LLM_SCORE_MAX_EVENTS_PER_TIMESTEP']}, "
+        f"use_logprob={os.environ['USE_LOGPROB_PREDICTION']}"
+    )
+
+
 def _log_quick_test_footer() -> None:
     """Short interpretation for Colab logs (paper §§3.2–3.3, IMPROVE.MD prediction parsing)."""
     _log("")
@@ -542,6 +575,10 @@ def test_prediction_metrics(
     start_index
         Offset into the validation split (default 0 = same first query as legacy ``test_prediction``).
     """
+    # Optional fast debug mode for quick correctness checks on Colab.
+    if _env_truthy("FAST_EVAL", default=False):
+        apply_fast_eval_config()
+
     # If the notebook calls this function directly (without `setup()`),
     # we still want sane defaults that match `IMPROVE.MD` guidance.
     #
