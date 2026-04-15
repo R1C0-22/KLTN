@@ -387,7 +387,7 @@ def apply_fast_eval_config() -> None:
 
     # Reduce DTF/PDC runtime pressure.
     os.environ["MAX_DTF_TIMESTEP_ITERATIONS"] = os.environ.get(
-        "FAST_MAX_DTF_TIMESTEP_ITERATIONS", "10"
+        "FAST_MAX_DTF_TIMESTEP_ITERATIONS", "15"
     )
     os.environ["LLM_SCORE_MAX_EVENTS_PER_TIMESTEP"] = os.environ.get(
         "FAST_LLM_SCORE_MAX_EVENTS_PER_TIMESTEP", "32"
