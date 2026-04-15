@@ -320,13 +320,13 @@ def setup(
     # if top-1 probability < threshold, retry with O²q. Set >0 to enable.
     os.environ.setdefault("ADAPTIVE_CONFIDENCE_THRESHOLD", "0")
     os.environ.setdefault("DTF_ALPHA", "2.75")
-    # Logprob prediction (paper §3.3): map candidates to indices, score via
-    # logprob, softmax → probability distribution for Hit@k.
+    # Prediction mode default on HF local (Colab T4): generate+parse is the stable
+    # baseline for thesis runs. Logprob scoring remains opt-in for paper §3.3
+    # ablations via USE_LOGPROB_PREDICTION=1.
     #
-    # Enabled for HF local: KV-cache path (unified.py _logprobs_huggingface_kv_cached)
-    # is stable and fast on T4. Without logprobs, Hit@10 ≡ Hit@1 (binary probs).
-    # Override: USE_LOGPROB_PREDICTION=0 to revert to generate+parse.
-    os.environ.setdefault("USE_LOGPROB_PREDICTION", "1")
+    # Important: set the value explicitly (not setdefault) so stale Colab envs from
+    # previous cells do not silently keep the old logprob-on behavior.
+    os.environ["USE_LOGPROB_PREDICTION"] = "0"
     # Dual history (§3.2): one LLM PDC call per calendar day processed until L is filled.
     # Dense subjects can require 100+ days → 30+ minutes per query on T4. Cap timesteps for
     # Colab notebooks; set to "0" for full paper-faithful DTF (slow overnight runs).
@@ -819,7 +819,8 @@ def test_prediction(sample_size: int = 500, use_second_order: bool = False) -> s
     On A100 prefer ``setup(..., load_4bit=False)`` and ``verbose=False`` for speed.
 
     This is a thin wrapper around :func:`test_prediction_metrics` with ``n_queries=1``.
-    For paper-faithful numbers, call ``test_prediction_metrics(n_queries=20, ...)`` instead.
+    A single miss is common and does not indicate a pipeline bug. For meaningful
+    Hit@k, call ``test_prediction_metrics(n_queries=20, ...)`` or more.
     """
     stats = test_prediction_metrics(
         n_queries=1,
