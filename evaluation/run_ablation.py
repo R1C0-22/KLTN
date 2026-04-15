@@ -30,6 +30,9 @@ def _run_one(name: str, env_patch: dict[str, str], n_queries: int, sample_size: 
         "setting": name,
         "hit@1": float(result["hit_at_1"]),
         "hit@10": float(result["hit_at_10"]),
+        "hit@1_filtered": float(result["hit_at_1_filtered"]),
+        "hit@10_filtered": float(result["hit_at_10_filtered"]),
+        "eval_filter": str(result["eval_filter"]),
         "evaluated": int(result["evaluated"]),
         "skipped": int(result["skipped_gt_not_in_oq"]),
     }
@@ -88,9 +91,14 @@ def main() -> None:
 
     rows = [baseline, wo_long_term, wo_short_term, wo_analogical]
     print("\nAblation results")
-    print("setting,hit@1,hit@10,evaluated,skipped")
+    print("setting,eval_filter,hit@1,hit@10,hit@1_filtered,hit@10_filtered,evaluated,skipped")
     for r in rows:
-        print(f"{r['setting']},{r['hit@1']:.4f},{r['hit@10']:.4f},{r['evaluated']},{r['skipped']}")
+        print(
+            f"{r['setting']},{r['eval_filter']},"
+            f"{r['hit@1']:.4f},{r['hit@10']:.4f},"
+            f"{r['hit@1_filtered']:.4f},{r['hit@10_filtered']:.4f},"
+            f"{r['evaluated']},{r['skipped']}"
+        )
 
 
 if __name__ == "__main__":

@@ -48,6 +48,7 @@ Extras:
 from __future__ import annotations
 
 import gc
+import json
 import os
 import subprocess
 import sys
@@ -580,10 +581,25 @@ def test_prediction_metrics(
     from preprocessing import load_dataset
     from inference.final_prediction import get_prediction_context, predict_from_context
     from clustering.entity_cluster import cluster_entities, extract_entities
+    from evaluation.eval_filters import (
+        build_filter_index,
+        compute_rank,
+        filter_ranked_predictions,
+        normalize_filter_mode,
+    )
 
     data_dir = os.environ.get("TKG_DATA_DIR", DEFAULT_DATA_DIR)
     valid_data = load_dataset(data_dir, splits=["valid"])
     train_data = load_dataset(data_dir, splits=["train"])
+    test_data = load_dataset(data_dir, splits=["test"])
+    eval_filter = normalize_filter_mode(os.environ.get("EVAL_FILTER", "none"))
+    filter_index = build_filter_index(
+        train_data=train_data,
+        valid_data=valid_data,
+        test_data=test_data,
+        mode=eval_filter,
+    )
+    output_path = os.environ.get("EVAL_OUTPUT_PATH", "").strip()
     n_valid = len(valid_data)
     if n_valid == 0:
         raise RuntimeError(f"No validation quadruples in {data_dir}")
@@ -628,9 +644,12 @@ def test_prediction_metrics(
 
     hits1 = 0
     hits10 = 0
+    hits1_filtered = 0
+    hits10_filtered = 0
     evaluated = 0
     skipped = 0
     last_prediction = ""
+    records: list[dict[str, object]] = []
 
     for idx in range(start_index, end):
         e = valid_data[idx]
@@ -644,6 +663,23 @@ def test_prediction_metrics(
             _log(
                 f"[test_prediction_metrics] i={idx} SKIP gt not in Oq | gt={gt!r} |Oq|={len(ctx.candidate_set)}"
             )
+            if output_path:
+                records.append(
+                    {
+                        "index": idx,
+                        "query": {
+                            "subject": query[0],
+                            "relation": query[1],
+                            "timestamp": query[3],
+                        },
+                        "ground_truth": gt,
+                        "candidate_size": len(ctx.candidate_set),
+                        "candidate_set": [c.strip() for c in ctx.candidate_set],
+                        "in_oq": False,
+                        "skipped_reason": "gt_not_in_oq",
+                        "eval_filter": eval_filter,
+                    }
+                )
             continue
 
         _log(
@@ -658,16 +694,72 @@ def test_prediction_metrics(
         evaluated += 1
         ok1 = pred == gt
         ok10 = res.hit_at_k(gt, 10)
+        ranked = res.get_ranked_candidates()
+        filtered_predictions = filter_ranked_predictions(
+            query=query,
+            ground_truth=gt,
+            ranked_candidates=ranked,
+            index=filter_index,
+            mode=eval_filter,
+        )
+        rank_filtered = compute_rank(filtered_predictions, gt)
+        ok1_filtered = rank_filtered == 1
+        ok10_filtered = rank_filtered is not None and rank_filtered <= 10
         if ok1:
             hits1 += 1
         if ok10:
             hits10 += 1
+        if ok1_filtered:
+            hits1_filtered += 1
+        if ok10_filtered:
+            hits10_filtered += 1
         _log(
             f"[test_prediction_metrics] i={idx} predicted={pred!r} "
             f"Hit@1={ok1} Hit@10={ok10}"
         )
+        if eval_filter != "none":
+            _log(
+                f"[test_prediction_metrics] i={idx} filter={eval_filter} "
+                f"Hit@1_f={ok1_filtered} Hit@10_f={ok10_filtered}"
+            )
+        if output_path:
+            rank_raw = next(
+                (rank for rank, (cand, _p) in enumerate(ranked, start=1) if cand.strip() == gt),
+                None,
+            )
+            records.append(
+                {
+                    "index": idx,
+                    "query": {
+                        "subject": query[0],
+                        "relation": query[1],
+                        "timestamp": query[3],
+                    },
+                    "ground_truth": gt,
+                    "predicted": pred,
+                    "candidate_size": len(ctx.candidate_set),
+                    "candidate_set": [c.strip() for c in ctx.candidate_set],
+                    "in_oq": True,
+                    "used_second_order": bool(getattr(ctx, "used_second_order_neighbors", False)),
+                    "eval_filter": eval_filter,
+                    "raw": {
+                        "hit_at_1": ok1,
+                        "hit_at_10": ok10,
+                        "rank": rank_raw,
+                        "ranked_candidates": [c for c, _ in ranked],
+                        "ranked_probs": [float(p) for _, p in ranked],
+                        "top10": [c for c, _ in ranked[:10]],
+                        "top10_probs": [float(p) for _, p in ranked[:10]],
+                    },
+                    "filtered": {
+                        "hit_at_1": bool(ok1_filtered),
+                        "hit_at_10": bool(ok10_filtered),
+                        "rank": rank_filtered,
+                        "top10": filtered_predictions[:10],
+                    },
+                }
+            )
         if not ok10:
-            ranked = res.get_ranked_candidates()
             gt_rank = next(
                 (rank for rank, (cand, _p) in enumerate(ranked, start=1) if cand.strip() == gt),
                 None,
@@ -680,11 +772,25 @@ def test_prediction_metrics(
 
     hit1_rate = (hits1 / evaluated) if evaluated else 0.0
     hit10_rate = (hits10 / evaluated) if evaluated else 0.0
+    hit1_rate_filtered = (hits1_filtered / evaluated) if evaluated else 0.0
+    hit10_rate_filtered = (hits10_filtered / evaluated) if evaluated else 0.0
     _log(
         f"[test_prediction_metrics] SUMMARY evaluated={evaluated} "
         f"skipped_gt_not_in_Oq={skipped} "
         f"Hit@1={hit1_rate:.4f} Hit@10={hit10_rate:.4f}"
     )
+    if eval_filter != "none":
+        _log(
+            f"[test_prediction_metrics] SUMMARY_FILTERED mode={eval_filter} "
+            f"Hit@1={hit1_rate_filtered:.4f} Hit@10={hit10_rate_filtered:.4f}"
+        )
+    if output_path:
+        out = Path(output_path)
+        out.parent.mkdir(parents=True, exist_ok=True)
+        with out.open("w", encoding="utf-8") as fw:
+            for row in records:
+                fw.write(json.dumps(row, ensure_ascii=False) + "\n")
+        _log(f"[test_prediction_metrics] wrote {len(records)} rows to {out}")
     if end - start_index == 1 and evaluated == 1 and hits1 == 0:
         _log(
             "[test_prediction_metrics] NOTE: Hit@1 miss on one query is normal for TKGF; "
@@ -697,6 +803,9 @@ def test_prediction_metrics(
         "last_prediction": last_prediction,
         "hit_at_1": hit1_rate,
         "hit_at_10": hit10_rate,
+        "hit_at_1_filtered": hit1_rate_filtered,
+        "hit_at_10_filtered": hit10_rate_filtered,
+        "eval_filter": eval_filter,
         "evaluated": evaluated,
         "skipped_gt_not_in_oq": skipped,
         "n_queries_run": end - start_index,

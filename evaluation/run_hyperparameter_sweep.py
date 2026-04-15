@@ -35,7 +35,7 @@ def main() -> None:
     L_values = _parse_list_env("SWEEP_HISTORY_LENGTH_L", "50,100,150")
     a_values = _parse_list_env("SWEEP_DTF_ALPHA", "2.25,2.75,3.00")
 
-    print("L,l,alpha,hit@1,hit@10,evaluated,skipped")
+    print("L,l,alpha,eval_filter,hit@1,hit@10,hit@1_filtered,hit@10_filtered,evaluated,skipped")
     for L, l, alpha in product(L_values, l_values, a_values):
         patch = {
             "HISTORY_LENGTH_L": L,
@@ -50,9 +50,11 @@ def main() -> None:
                 start_index=0,
             )
         print(
-            f"{L},{l},{alpha},"
+            f"{L},{l},{alpha},{result['eval_filter']},"
             f"{float(result['hit_at_1']):.4f},"
             f"{float(result['hit_at_10']):.4f},"
+            f"{float(result['hit_at_1_filtered']):.4f},"
+            f"{float(result['hit_at_10_filtered']):.4f},"
             f"{int(result['evaluated'])},"
             f"{int(result['skipped_gt_not_in_oq'])}"
         )

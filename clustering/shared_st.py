@@ -31,17 +31,36 @@ def get_shared_sentence_transformer(
         os.environ.get("HF_TOKEN", "").strip()
         or os.environ.get("HUGGINGFACE_HUB_TOKEN", "").strip()
     )
-    if hf_token:
-        try:
-            model = SentenceTransformer(
-                model_name, device=device, token=hf_token
-            )
-        except TypeError:
-            model = SentenceTransformer(
-                model_name, device=device, use_auth_token=hf_token
-            )
-    else:
-        model = SentenceTransformer(model_name, device=device)
+    def _load(cache_folder: str | None = None) -> Any:
+        kwargs: dict[str, Any] = {"device": device}
+        if cache_folder:
+            kwargs["cache_folder"] = cache_folder
+        if hf_token:
+            try:
+                return SentenceTransformer(model_name, token=hf_token, **kwargs)
+            except TypeError:
+                return SentenceTransformer(model_name, use_auth_token=hf_token, **kwargs)
+        return SentenceTransformer(model_name, **kwargs)
+
+    try:
+        model = _load()
+    except OSError as exc:
+        # Colab + Google Drive can intermittently fail with:
+        #   OSError: [Errno 5] Input/output error
+        # when HF hub cache lives on Drive. Retry once with local cache.
+        msg = str(exc).lower()
+        is_io_err = getattr(exc, "errno", None) == 5 or "input/output error" in msg
+        if not is_io_err:
+            raise
+
+        fallback_cache = os.environ.get("ST_LOCAL_CACHE_DIR", "/content/hf_cache").strip()
+        os.makedirs(fallback_cache, exist_ok=True)
+        print(
+            "[shared_st] HF cache I/O error detected; retrying SentenceTransformer "
+            f"with local cache_folder={fallback_cache}",
+            flush=True,
+        )
+        model = _load(cache_folder=fallback_cache)
 
     _MODEL = model
     _CACHE_KEY = key
