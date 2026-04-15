@@ -322,10 +322,10 @@ def setup(
     # Logprob prediction (paper §3.3): map candidates to indices, score via
     # logprob, softmax → probability distribution for Hit@k.
     #
-    # On local HF (Colab/T4), generation+index parsing is often more stable.
-    # Keep logprob available via USE_LOGPROB_PREDICTION=1 for ablations.
-    # Without logprobs, Hit@10 ≡ Hit@1 (binary probabilities).
-    os.environ.setdefault("USE_LOGPROB_PREDICTION", "0")
+    # Enabled for HF local: KV-cache path (unified.py _logprobs_huggingface_kv_cached)
+    # is stable and fast on T4. Without logprobs, Hit@10 ≡ Hit@1 (binary probs).
+    # Override: USE_LOGPROB_PREDICTION=0 to revert to generate+parse.
+    os.environ.setdefault("USE_LOGPROB_PREDICTION", "1")
     # Dual history (§3.2): one LLM PDC call per calendar day processed until L is filled.
     # Dense subjects can require 100+ days → 30+ minutes per query on T4. Cap timesteps for
     # Colab notebooks; set to "0" for full paper-faithful DTF (slow overnight runs).

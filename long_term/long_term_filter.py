@@ -177,6 +177,7 @@ def _compute_scores_one_chunk(
     if len(logits) > expected:
         logits = list(logits)[:expected]
 
+    # n=1: softmax([x]) = [1.0] regardless of x; skip degenerate check entirely.
     if len(logits) > 1:
         mn, mx = min(logits), max(logits)
         if (mx - mn) < 1e-9:

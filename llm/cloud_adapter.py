@@ -145,6 +145,8 @@ def predict_fn(prompt: str) -> str:
 
     if not isinstance(out, str):
         out = str(out)
+    if env_truthy("LLM_VERBOSE"):
+        print(f"[llm] predict_fn raw output: {out[:300]!r}", flush=True)
     text = _strip_outer_quotes(out)
 
     if use_cache:
