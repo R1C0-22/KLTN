@@ -279,6 +279,7 @@ def setup(
     effective_4bit = _resolve_load_4bit(load_4bit)
 
     os.environ["LLM_PROVIDER"] = "hf"
+    os.environ.setdefault("PYTORCH_CUDA_ALLOC_CONF", "expandable_segments:True")
     os.environ["HF_MODEL_ID"] = model_id
     os.environ["HF_LOAD_IN_4BIT"] = "1" if effective_4bit else "0"
     os.environ["HF_MAX_NEW_TOKENS"] = str(max_tokens)
@@ -397,6 +398,13 @@ def apply_fast_eval_config() -> None:
     os.environ["SHORT_TERM_L"] = os.environ.get("FAST_SHORT_TERM_L", "10")
     os.environ["HISTORY_LENGTH_L"] = os.environ.get("FAST_HISTORY_LENGTH_L", "40")
     os.environ["NUM_ANALOGICAL_EXAMPLES"] = os.environ.get("FAST_NUM_ANALOGICAL_EXAMPLES", "1")
+    # Cap prediction prefill/decode for T4 VRAM safety on long Oq prompts.
+    os.environ["HF_PREDICT_MAX_NEW_TOKENS"] = os.environ.get(
+        "FAST_HF_PREDICT_MAX_NEW_TOKENS", "160"
+    )
+    os.environ["HF_PREDICT_MAX_INPUT_TOKENS"] = os.environ.get(
+        "FAST_HF_PREDICT_MAX_INPUT_TOKENS", "3072"
+    )
 
     _log(
         "[fast-config] applied: "
@@ -404,7 +412,9 @@ def apply_fast_eval_config() -> None:
         f"max_dtf_days={os.environ['MAX_DTF_TIMESTEP_ITERATIONS']}, "
         f"chunk={os.environ['LLM_SCORE_CHUNK_SIZE']}, "
         f"cap_per_day={os.environ['LLM_SCORE_MAX_EVENTS_PER_TIMESTEP']}, "
-        f"use_logprob={os.environ['USE_LOGPROB_PREDICTION']}"
+        f"use_logprob={os.environ['USE_LOGPROB_PREDICTION']}, "
+        f"predict_max_new={os.environ['HF_PREDICT_MAX_NEW_TOKENS']}, "
+        f"predict_input_cap={os.environ['HF_PREDICT_MAX_INPUT_TOKENS']}"
     )
 
 
@@ -717,6 +727,8 @@ def test_prediction_metrics(
                         "eval_filter": eval_filter,
                     }
                 )
+            # Keep GPU memory stable across long multi-query runs.
+            clear_gpu_memory()
             continue
 
         _log(
@@ -806,6 +818,8 @@ def test_prediction_metrics(
                 f"[test_prediction_metrics] i={idx} MISS gt_rank={gt_rank} "
                 f"top5=[{top5}]"
             )
+        # Keep VRAM fragmentation low between queries on Colab T4.
+        clear_gpu_memory()
 
     hit1_rate = (hits1 / evaluated) if evaluated else 0.0
     hit10_rate = (hits10 / evaluated) if evaluated else 0.0

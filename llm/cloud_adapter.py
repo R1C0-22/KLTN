@@ -122,8 +122,11 @@ def predict_fn(prompt: str) -> str:
     Cached when LLM_CACHE_DIR is set (same mechanism as generate_fn / score_fn).
     Set LLM_CACHE_PREDICT=0 to bypass cache for this step.
 
-    Optional: ``HF_PREDICT_MAX_NEW_TOKENS`` overrides ``HF_MAX_NEW_TOKENS`` for this call only
-    (short rationale + index; default in ``setup()`` is enough for most cases).
+    Optional:
+      - ``HF_PREDICT_MAX_NEW_TOKENS`` overrides ``HF_MAX_NEW_TOKENS`` for this
+        call only (short rationale + index).
+      - ``HF_PREDICT_MAX_INPUT_TOKENS`` overrides ``HF_MAX_INPUT_TOKENS`` for
+        this call only (useful on Colab T4 to avoid prefill OOM on very long prompts).
     """
     use_cache = env_truthy("LLM_CACHE_PREDICT", default=True)
     if use_cache:
@@ -132,16 +135,44 @@ def predict_fn(prompt: str) -> str:
             return _strip_outer_quotes(cached)
 
     saved_max = os.environ.get("HF_MAX_NEW_TOKENS")
+    saved_input_cap = os.environ.get("HF_MAX_INPUT_TOKENS")
     predict_max = os.environ.get("HF_PREDICT_MAX_NEW_TOKENS", "").strip()
+    predict_input_cap = os.environ.get("HF_PREDICT_MAX_INPUT_TOKENS", "").strip()
     if predict_max.isdigit():
         os.environ["HF_MAX_NEW_TOKENS"] = predict_max
+    if predict_input_cap.isdigit():
+        os.environ["HF_MAX_INPUT_TOKENS"] = predict_input_cap
     try:
         out = call_llm(prompt)
+    except Exception as exc:
+        # Colab T4: very long final prompts (large |Oq|) can OOM in prefill.
+        # Retry once with tighter generation caps to finish the query.
+        if env_truthy("HF_PREDICT_OOM_RETRY", default=True) and "out of memory" in str(exc).lower():
+            retry_new = os.environ.get("HF_PREDICT_OOM_RETRY_MAX_NEW_TOKENS", "96").strip()
+            retry_cap = os.environ.get("HF_PREDICT_OOM_RETRY_MAX_INPUT_TOKENS", "2048").strip()
+            if retry_new.isdigit():
+                os.environ["HF_MAX_NEW_TOKENS"] = retry_new
+            if retry_cap.isdigit():
+                os.environ["HF_MAX_INPUT_TOKENS"] = retry_cap
+            try:
+                import torch  # type: ignore
+
+                if torch.cuda.is_available():
+                    torch.cuda.empty_cache()
+            except Exception:
+                pass
+            out = call_llm(prompt)
+        else:
+            raise
     finally:
         if saved_max is None:
             os.environ.pop("HF_MAX_NEW_TOKENS", None)
         else:
             os.environ["HF_MAX_NEW_TOKENS"] = saved_max
+        if saved_input_cap is None:
+            os.environ.pop("HF_MAX_INPUT_TOKENS", None)
+        else:
+            os.environ["HF_MAX_INPUT_TOKENS"] = saved_input_cap
 
     if not isinstance(out, str):
         out = str(out)
